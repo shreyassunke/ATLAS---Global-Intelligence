@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { DEFAULT_SOURCES, NEWS_SOURCES } from '../utils/newsSources'
 import { CATEGORY_KEYS } from '../utils/categoryColors'
+import { loadQualitySettings, saveQualitySettings, loadGlobeMode, saveGlobeMode, QUALITY_TIERS } from '../config/qualityTiers'
 
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
@@ -37,6 +38,9 @@ function loadOnboarded() {
   return localStorage.getItem(STORAGE_KEY_ONBOARDED) === 'true'
 }
 
+// Load persisted quality state
+const savedQuality = loadQualitySettings()
+
 export const useAtlasStore = create((set, get) => ({
   newsItems: [],
   activeCategories: new Set(CATEGORY_KEYS),
@@ -51,14 +55,22 @@ export const useAtlasStore = create((set, get) => ({
   sourceCatalog: [],
   streetViewLocation: null,
   isStreetViewOpen: false,
-  /** One manual refresh per day; when true, Refresh button is disabled until next day */
   manualRefreshUsedToday: false,
-  /** Set by useNewsData so Header can trigger a manual refresh */
   triggerManualRefresh: null,
-  /** True while particle-to-Earth transition is running (Launch clicked, before globe) */
   launchTransitionActive: false,
-  /** When true, CesiumGlobe skips its 3s intro flyTo and lands at final view */
   skipCesiumIntro: false,
+
+  // ── Quality & Globe Renderer ──
+  /** 'cesium' | 'globegl' | 'leaflet' */
+  globeMode: loadGlobeMode(),
+  /** 'auto' | 'high' | 'medium' | 'low' */
+  qualityTier: savedQuality?.tier || 'auto',
+  /** Resolved tier after auto-detection: 'high' | 'medium' | 'low' */
+  resolvedTier: savedQuality?.resolved || 'high',
+  /** Per-setting overrides (user toggled individual settings) */
+  qualityOverrides: savedQuality?.overrides || {},
+  /** Whether settings panel is open */
+  settingsOpen: false,
 
   setNewsItems: (items) => set({ newsItems: items, lastUpdated: new Date(), isLoading: false }),
   setManualRefreshUsedToday: (used) => set({ manualRefreshUsedToday: used }),
@@ -126,4 +138,49 @@ export const useAtlasStore = create((set, get) => ({
       isStreetViewOpen: true,
     })),
   closeStreetView: () => set(() => ({ isStreetViewOpen: false })),
+
+  // ── Quality & Globe Mode Setters ──
+  setGlobeMode: (mode) => {
+    saveGlobeMode(mode)
+    set({ globeMode: mode })
+  },
+
+  setQualityTier: (tier) => {
+    const state = get()
+    const resolved = tier === 'auto' ? state.resolvedTier : tier
+    saveQualitySettings({ tier, resolved, overrides: state.qualityOverrides })
+    set({ qualityTier: tier, resolvedTier: resolved })
+  },
+
+  setResolvedTier: (resolved) => {
+    const state = get()
+    saveQualitySettings({ tier: state.qualityTier, resolved, overrides: state.qualityOverrides })
+    set({ resolvedTier: resolved })
+  },
+
+  setQualityOverride: (key, value) => {
+    const state = get()
+    const overrides = { ...state.qualityOverrides, [key]: value }
+    saveQualitySettings({ tier: state.qualityTier, resolved: state.resolvedTier, overrides })
+    set({ qualityOverrides: overrides })
+  },
+
+  clearQualityOverrides: () => {
+    const state = get()
+    saveQualitySettings({ tier: state.qualityTier, resolved: state.resolvedTier, overrides: {} })
+    set({ qualityOverrides: {} })
+  },
+
+  toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
+  setSettingsOpen: (v) => set({ settingsOpen: v }),
+
+  /**
+   * Get the effective value for a quality setting, accounting for user overrides.
+   */
+  getEffectiveSetting: (key) => {
+    const state = get()
+    if (key in state.qualityOverrides) return state.qualityOverrides[key]
+    const tier = QUALITY_TIERS[state.resolvedTier] || QUALITY_TIERS.high
+    return typeof tier[key] === 'function' ? tier[key]() : tier[key]
+  },
 }))

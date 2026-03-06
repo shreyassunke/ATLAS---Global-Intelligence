@@ -6,6 +6,7 @@ import { useAtlasStore } from '../../store/atlasStore'
 import { CATEGORIES, getCategoryColor } from '../../utils/categoryColors'
 import { getRegionKey, getTimezoneViewCenter } from '../../utils/geo'
 import { MOCK_NEWS } from '../../utils/mockData'
+import { QUALITY_TIERS, detectQualityTier } from '../../config/qualityTiers'
 
 // Cesium ion token from .env — used for World Imagery, World Terrain, Black Marble (3812), Photorealistic 3D Tiles
 const ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN || ''
@@ -50,6 +51,22 @@ export default function CesiumGlobe({ onGlobeReady }) {
   const newsItems = useAtlasStore((s) => s.newsItems)
   const activeCategories = useAtlasStore((s) => s.activeCategories)
   const openStreetView = useAtlasStore((s) => s.openStreetView)
+
+  // Quality tier state
+  const qualityTier = useAtlasStore((s) => s.qualityTier)
+  const resolvedTier = useAtlasStore((s) => s.resolvedTier)
+  const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
+  const setResolvedTier = useAtlasStore((s) => s.setResolvedTier)
+
+  // Refs for layers that can be toggled by quality settings
+  const layerRefs = useRef({
+    bloom: null,
+    vignette: null,
+    lightsLayer: null,
+    labelsLayer: null,
+    tiles3d: null,
+    terrainProvider: null,
+  })
 
   // Convert CSS color to Cesium Color (cached)
   const colorCache = useRef(new Map())
@@ -149,6 +166,14 @@ export default function CesiumGlobe({ onGlobeReady }) {
         Cesium.Ion.defaultAccessToken = ION_TOKEN
       }
 
+      // ── Get effective quality setting (overrides > tier default) ──
+      const eff = (key) => {
+        const st = useAtlasStore.getState()
+        if (key in st.qualityOverrides) return st.qualityOverrides[key]
+        const tier = QUALITY_TIERS[st.resolvedTier] || QUALITY_TIERS.high
+        return typeof tier[key] === 'function' ? tier[key]() : tier[key]
+      }
+
       const viewer = new Cesium.Viewer(container, {
         animation: false,
         baseLayerPicker: false,
@@ -164,10 +189,10 @@ export default function CesiumGlobe({ onGlobeReady }) {
         creditContainer: document.createElement('div'),
         scene3DOnly: true,
         shouldAnimate: true,
-        msaaSamples: 2,                         // Reduced from 4 for perf
+        msaaSamples: eff('msaa'),
         useBrowserRecommendedResolution: false,
-        requestRenderMode: true,                 // Only render when needed
-        maximumRenderTimeChange: Infinity,       // Render on interaction/clock only
+        requestRenderMode: true,
+        maximumRenderTimeChange: Infinity,
       })
 
       if (destroyed) {
@@ -207,14 +232,17 @@ export default function CesiumGlobe({ onGlobeReady }) {
         }
       }
 
-      // --- Terrain ---
-      if (ION_TOKEN) {
+      // --- Terrain (quality-dependent) ---
+      if (ION_TOKEN && eff('terrain')) {
         try {
           const terrain = await Cesium.createWorldTerrainAsync({
             requestWaterMask: true,
             requestVertexNormals: true,
           })
-          if (!destroyed) viewer.terrainProvider = terrain
+          if (!destroyed) {
+            viewer.terrainProvider = terrain
+            layerRefs.current.terrainProvider = terrain
+          }
         } catch {
           /* ellipsoid fallback */
         }
@@ -256,7 +284,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
       // Sky atmosphere — softer edge, seamless transition into space
       if (scene.skyAtmosphere) {
         scene.skyAtmosphere.show = true
-        scene.skyAtmosphere.perFragmentAtmosphere = true
+        scene.skyAtmosphere.perFragmentAtmosphere = eff('atmosphere') === 'fragment'
         scene.skyAtmosphere.brightnessShift = -0.08
         scene.skyAtmosphere.saturationShift = 0.0
         scene.skyAtmosphere.atmosphereLightIntensity = 28.0
@@ -287,7 +315,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
       // ---------------------------------------------------------------
       //  Fog — blends distant terrain into the atmosphere (horizon haze)
       // ---------------------------------------------------------------
-      scene.fog.enabled = true
+      scene.fog.enabled = eff('fog')
       scene.fog.density = 0.0006
       scene.fog.maxHeight = 60_000_000.0
       scene.fog.minimumBrightness = 0.03
@@ -302,16 +330,16 @@ export default function CesiumGlobe({ onGlobeReady }) {
       // ---------------------------------------------------------------
       //  Resolution & quality
       // ---------------------------------------------------------------
-      globe.maximumScreenSpaceError = 1.5
+      globe.maximumScreenSpaceError = eff('maxScreenSpaceError')
       globe.tileCacheSize = 1000
       globe.preloadAncestors = true
-      viewer.resolutionScale = Math.min(window.devicePixelRatio || 1.0, 2.0)
+      viewer.resolutionScale = eff('resolutionScale')
 
       // ---------------------------------------------------------------
       //  Photorealistic 3D Tiles (ion) — lazy-loaded via requestIdleCallback
       // ---------------------------------------------------------------
       let photorealisticTilesetRef = null
-      if (ION_TOKEN) {
+      if (ION_TOKEN && eff('tiles3d')) {
         const loadTiles = async () => {
           try {
             const photorealisticTileset = await Cesium.createGooglePhotorealistic3DTileset()
@@ -319,6 +347,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
               photorealisticTileset.maximumScreenSpaceError = 16
               photorealisticTileset.show = false
               photorealisticTilesetRef = photorealisticTileset
+              layerRefs.current.tiles3d = photorealisticTileset
               viewer.scene.primitives.add(photorealisticTileset)
               scene.requestRender()
             }
@@ -338,29 +367,32 @@ export default function CesiumGlobe({ onGlobeReady }) {
       //  Labels overlay — cities, countries, oceans
       // ---------------------------------------------------------------
       let labelsLayerRef = null
-      try {
-        const labelsProvider = new Cesium.UrlTemplateImageryProvider({
-          url: 'https://basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png',
-          maximumLevel: 18,
-          credit: 'CartoDB',
-        })
-        const labelsLayer =
-          viewer.imageryLayers.addImageryProvider(labelsProvider)
-        labelsLayer.alpha = 1.0
-        labelsLayer.brightness = 2.0
-        labelsLayer.contrast = 1.5
-        labelsLayer.dayAlpha = 1.0
-        labelsLayer.nightAlpha = 0.55
-        labelsLayerRef = labelsLayer
-      } catch {
-        /* labels unavailable */
+      if (eff('labels')) {
+        try {
+          const labelsProvider = new Cesium.UrlTemplateImageryProvider({
+            url: 'https://basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png',
+            maximumLevel: 18,
+            credit: 'CartoDB',
+          })
+          const labelsLayer =
+            viewer.imageryLayers.addImageryProvider(labelsProvider)
+          labelsLayer.alpha = 1.0
+          labelsLayer.brightness = 2.0
+          labelsLayer.contrast = 1.5
+          labelsLayer.dayAlpha = 1.0
+          labelsLayer.nightAlpha = 0.55
+          labelsLayerRef = labelsLayer
+          layerRefs.current.labelsLayer = labelsLayer
+        } catch {
+          /* labels unavailable */
+        }
       }
 
       // ---------------------------------------------------------------
       //  Night lights (globe.gl-style) — NASA Black Marble
       // ---------------------------------------------------------------
       let lightsLayer = null
-      if (ION_TOKEN) {
+      if (ION_TOKEN && eff('nightLights')) {
         try {
           const blackMarbleProvider = await Cesium.IonImageryProvider.fromAssetId(3812)
           if (!destroyed) {
@@ -370,7 +402,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
           console.warn('Cesium ion Black Marble (3812) failed, using NASA GIBS fallback:', e?.message || e)
         }
       }
-      if (!lightsLayer) {
+      if (!lightsLayer && eff('nightLights')) {
         try {
           const gibsProvider = new Cesium.WebMapTileServiceImageryProvider({
             url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/wmts.cgi',
@@ -393,6 +425,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
         lightsLayer.contrast = 1.5
         lightsLayer.dayAlpha = 0.0
         lightsLayer.nightAlpha = 1.0
+        layerRefs.current.lightsLayer = lightsLayer
         const baseLayer = viewer.imageryLayers.get(0)
         if (baseLayer && baseLayer !== lightsLayer) {
           baseLayer.dayAlpha = 1.0
@@ -459,19 +492,21 @@ export default function CesiumGlobe({ onGlobeReady }) {
       //  Post-processing — bloom (reduced stepSize for perf)
       // ---------------------------------------------------------------
       const bloom = scene.postProcessStages.bloom
-      bloom.enabled = true
+      bloom.enabled = eff('bloom')
       bloom.uniforms.glowOnly = false
       bloom.uniforms.contrast = 80
       bloom.uniforms.brightness = -0.1
       bloom.uniforms.delta = 1.0
       bloom.uniforms.sigma = 5.0
-      bloom.uniforms.stepSize = 1.5    // Reduced from 2.0 for cheaper post-process
+      bloom.uniforms.stepSize = 1.5
+      layerRefs.current.bloom = bloom
 
       // ---------------------------------------------------------------
-      //  Post-processing — vignette
+      //  Post-processing — vignette (quality-dependent)
       // ---------------------------------------------------------------
-      scene.postProcessStages.add(
-        new Cesium.PostProcessStage({
+      let vignetteStage = null
+      if (eff('vignette')) {
+        vignetteStage = new Cesium.PostProcessStage({
           name: 'atlas_vignette',
           fragmentShader: `
             uniform sampler2D colorTexture;
@@ -484,8 +519,10 @@ export default function CesiumGlobe({ onGlobeReady }) {
               out_FragColor = vec4(color.rgb * vig, color.a);
             }
           `,
-        }),
-      )
+        })
+        scene.postProcessStages.add(vignetteStage)
+        layerRefs.current.vignette = vignetteStage
+      }
 
       // ---------------------------------------------------------------
       //  Camera altitude → zoom level (throttled)
@@ -763,6 +800,18 @@ export default function CesiumGlobe({ onGlobeReady }) {
         }
         removeListener = viewer.scene.postRender.addEventListener(callback)
       }
+
+      // ---------------------------------------------------------------
+      //  FPS auto-detection (only when tier = 'auto')
+      // ---------------------------------------------------------------
+      if (useAtlasStore.getState().qualityTier === 'auto') {
+        detectQualityTier().then((detected) => {
+          if (!destroyed) {
+            useAtlasStore.getState().setResolvedTier(detected)
+            console.log(`[Atlas] Auto-detected quality tier: ${detected}`)
+          }
+        })
+      }
     }
 
     init()
@@ -774,6 +823,64 @@ export default function CesiumGlobe({ onGlobeReady }) {
       if (viewer && !viewer.isDestroyed()) viewer.destroy()
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── React to quality setting changes at runtime ───
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer || viewer.isDestroyed()) return
+
+    const eff = (key) => {
+      const st = useAtlasStore.getState()
+      if (key in st.qualityOverrides) return st.qualityOverrides[key]
+      const tier = QUALITY_TIERS[st.resolvedTier] || QUALITY_TIERS.high
+      return typeof tier[key] === 'function' ? tier[key]() : tier[key]
+    }
+
+    const scene = viewer.scene
+
+    // Resolution
+    viewer.resolutionScale = eff('resolutionScale')
+
+    // Bloom
+    if (scene.postProcessStages.bloom) {
+      scene.postProcessStages.bloom.enabled = eff('bloom')
+    }
+
+    // Vignette
+    if (layerRefs.current.vignette) {
+      layerRefs.current.vignette.enabled = eff('vignette')
+    }
+
+    // Fog
+    scene.fog.enabled = eff('fog')
+
+    // Atmosphere
+    if (scene.skyAtmosphere) {
+      const atm = eff('atmosphere')
+      scene.skyAtmosphere.show = atm !== 'off'
+      scene.skyAtmosphere.perFragmentAtmosphere = atm === 'fragment'
+    }
+
+    // Night lights
+    if (layerRefs.current.lightsLayer) {
+      layerRefs.current.lightsLayer.show = eff('nightLights')
+    }
+
+    // Labels
+    if (layerRefs.current.labelsLayer) {
+      layerRefs.current.labelsLayer.show = eff('labels')
+    }
+
+    // 3D Tiles
+    if (layerRefs.current.tiles3d) {
+      layerRefs.current.tiles3d.show = eff('tiles3d')
+    }
+
+    // Screen space error
+    scene.globe.maximumScreenSpaceError = eff('maxScreenSpaceError')
+
+    scene.requestRender()
+  }, [resolvedTier, qualityOverrides]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // React to news data / filter changes — toggle show instead of full rebuild
   useEffect(() => {

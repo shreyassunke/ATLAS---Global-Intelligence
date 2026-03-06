@@ -12,6 +12,7 @@ import LiveTicker from './components/Feed/LiveTicker'
 import HoverLabel from './components/UI/RegionRing'
 import ClockOverlay from './components/UI/ClockOverlay'
 import StreetViewOverlay from './components/UI/StreetViewOverlay'
+import SettingsPanel from './components/UI/SettingsPanel'
 
 // Lazy-load heavy 3D components — Cesium (~4MB) and Three.js (~1MB) don't
 // need to be in the initial bundle since they're only rendered after onboarding.
@@ -131,6 +132,7 @@ export default function App() {
                   <StreetViewOverlay />
                   <HoverLabel />
                   <LiveTicker />
+                  <SettingsPanel />
                 </motion.div>
               )}
             </AnimatePresence>

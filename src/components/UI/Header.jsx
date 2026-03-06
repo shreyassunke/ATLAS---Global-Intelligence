@@ -11,17 +11,19 @@ export default function Header({ hudHidden = false, onToggleHud }) {
   const reopenOnboarding = useAtlasStore((s) => s.reopenOnboarding)
   const resetView = useAtlasStore((s) => s.resetView)
   const selectedSources = useAtlasStore((s) => s.selectedSources)
+  const toggleSettings = useAtlasStore((s) => s.toggleSettings)
+  const settingsOpen = useAtlasStore((s) => s.settingsOpen)
   const [searchOpen, setSearchOpen] = useState(false)
   const panelRef = useRef(null)
 
   const timeAgo = lastUpdated
     ? (() => {
-        const mins = Math.floor((Date.now() - new Date(lastUpdated).getTime()) / 60000)
-        if (mins < 60) return `${mins}m ago`
-        const hours = Math.floor(mins / 60)
-        if (hours < 24) return `${hours}h ago`
-        return `${Math.floor(hours / 24)}d ago`
-      })()
+      const mins = Math.floor((Date.now() - new Date(lastUpdated).getTime()) / 60000)
+      if (mins < 60) return `${mins}m ago`
+      const hours = Math.floor(mins / 60)
+      if (hours < 24) return `${hours}h ago`
+      return `${Math.floor(hours / 24)}d ago`
+    })()
     : '...'
 
   useEffect(() => {
@@ -93,6 +95,13 @@ export default function Header({ hudHidden = false, onToggleHud }) {
             </svg>
             Sources
             <span className="opacity-50">({selectedSources.length})</span>
+          </button>
+          <button
+            onClick={toggleSettings}
+            className={`hud-btn ${settingsOpen ? 'hud-btn-active' : ''}`}
+            title="Display settings"
+          >
+            ⚙ Settings
           </button>
           <button onClick={reopenOnboarding} className="hud-btn">
             Setup
