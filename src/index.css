@@ -1000,3 +1000,64 @@ body,
   color: var(--accent);
   border-color: rgba(0, 207, 255, 0.25);
 }
+
+/* ── Leaflet 2D Map ── */
+.flatmap-container .leaflet-container {
+  background: #0a0e1a !important;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.flatmap-container .leaflet-control-attribution {
+  background: rgba(8, 12, 24, 0.7) !important;
+  color: rgba(255, 255, 255, 0.3) !important;
+  font-size: 8px !important;
+}
+
+.flatmap-container .leaflet-control-attribution a {
+  color: rgba(0, 207, 255, 0.5) !important;
+}
+
+.flatmap-tooltip {
+  background: rgba(8, 12, 24, 0.92) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5) !important;
+  padding: 8px 12px !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  font-family: "JetBrains Mono", monospace !important;
+  font-size: 10px !important;
+  max-width: 260px !important;
+}
+
+.flatmap-tooltip::before {
+  border-top-color: rgba(8, 12, 24, 0.92) !important;
+}
+
+.flatmap-tooltip-inner {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 3px;
+}
+
+.flatmap-tooltip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.flatmap-tooltip-cat {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.flatmap-tooltip-title {
+  font-size: 10px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.85);
+}

@@ -14,9 +14,11 @@ import ClockOverlay from './components/UI/ClockOverlay'
 import StreetViewOverlay from './components/UI/StreetViewOverlay'
 import SettingsPanel from './components/UI/SettingsPanel'
 
-// Lazy-load heavy 3D components — Cesium (~4MB) and Three.js (~1MB) don't
+// Lazy-load heavy 3D components — Cesium (~4MB) and globe.gl/Three.js (~1MB) don't
 // need to be in the initial bundle since they're only rendered after onboarding.
 const CesiumGlobe = lazy(() => import('./components/Globe/CesiumGlobe'))
+const GlobeGLView = lazy(() => import('./components/Globe/GlobeGLView'))
+const FlatMap = lazy(() => import('./components/Globe/FlatMap'))
 const ParticleEarthTransition = lazy(() => import('./components/Transition/ParticleEarthTransition'))
 
 const SUN_ANGLE_THROTTLE_MS = 50
@@ -28,6 +30,7 @@ export default function App() {
   const [sunAngle, setSunAngle] = useState(0)
   const [globeReady, setGlobeReady] = useState(false)
   const lastSunAngleRef = useRef(0)
+  const globeMode = useAtlasStore((s) => s.globeMode)
   useNewsData()
 
   const onGlobeView = hasCompletedOnboarding && !launchTransitionActive
@@ -111,7 +114,13 @@ export default function App() {
             className="fixed inset-0"
           >
             <Suspense fallback={null}>
-              <CesiumGlobe onGlobeReady={() => setGlobeReady(true)} />
+              {globeMode === 'globegl' ? (
+                <GlobeGLView onGlobeReady={() => setGlobeReady(true)} />
+              ) : globeMode === 'leaflet' ? (
+                <FlatMap onGlobeReady={() => setGlobeReady(true)} />
+              ) : (
+                <CesiumGlobe onGlobeReady={() => setGlobeReady(true)} />
+              )}
             </Suspense>
             <AnimatePresence>
               {!hudHidden && (
