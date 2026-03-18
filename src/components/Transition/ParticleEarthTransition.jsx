@@ -16,6 +16,24 @@ function easeOutCubic(t) {
   return 1 - (1 - t) ** 3
 }
 
+/** Create a circular soft-glow particle texture (replaces default square) */
+function createParticleTexture(size = 64) {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  const cx = size / 2
+  const grad = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx)
+  grad.addColorStop(0, 'rgba(255, 255, 255, 1.0)')
+  grad.addColorStop(0.2, 'rgba(255, 255, 255, 0.8)')
+  grad.addColorStop(0.5, 'rgba(200, 228, 248, 0.35)')
+  grad.addColorStop(0.8, 'rgba(150, 200, 240, 0.08)')
+  grad.addColorStop(1, 'rgba(100, 160, 220, 0.0)')
+  ctx.fillStyle = grad
+  ctx.fillRect(0, 0, size, size)
+  return new THREE.CanvasTexture(canvas)
+}
+
 /** Scatter position: random in sphere (like starfield) */
 function randomScatter() {
   const phi = Math.acos(2 * Math.random() - 1)
@@ -76,8 +94,12 @@ export default function ParticleEarthTransition() {
     geometry.setAttribute('position', new THREE.BufferAttribute(startPositions.slice(), 3))
     geometry.attributes.position.needsUpdate = true
 
+    // Circular particle texture — replaces the default WebGL square points
+    const particleTex = createParticleTexture(64)
+
     const material = new THREE.PointsMaterial({
-      size: 0.012,
+      size: 0.018,
+      map: particleTex,
       color: 0xc8e4f8,
       transparent: true,
       opacity: 0.75,
@@ -163,6 +185,7 @@ export default function ParticleEarthTransition() {
       renderer.dispose()
       geometry.dispose()
       material.dispose()
+      particleTex.dispose()
       if (container && renderer.domElement) container.removeChild(renderer.domElement)
     }
   }, [completeOnboarding, endLaunchTransition, setSkipCesiumIntro])

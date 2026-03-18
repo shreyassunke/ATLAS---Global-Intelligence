@@ -3,15 +3,22 @@
  *
  * Renders news markers as coloured points with pulsing rings on a
  * day/night–shaded globe with real-time sun position (solar-calculator).
- * Much lighter than Cesium — no terrain engine, no tile streaming.
+ * Includes a visible Three.js sun (sprite + directional light) that
+ * tracks the real solar position, matching CesiumJS's sun appearance.
  *
  * Day/night cycle reference: https://globe.gl/example/day-night-cycle/
  */
 import { useEffect, useRef, useCallback } from 'react'
 import Globe from 'globe.gl'
-import { TextureLoader, ShaderMaterial, Vector2 } from 'three'
+import {
+    TextureLoader, ShaderMaterial, Vector2, Vector3,
+    DirectionalLight, AmbientLight, HemisphereLight,
+    Sprite, SpriteMaterial, CanvasTexture,
+    AdditiveBlending, Color,
+} from 'three'
 import * as solar from 'solar-calculator'
 import { useAtlasStore } from '../../store/atlasStore'
+import { getTimezoneViewCenter } from '../../utils/geo'
 import { getCategoryColor } from '../../utils/categoryColors'
 import { MOCK_NEWS } from '../../utils/mockData'
 
@@ -24,6 +31,75 @@ const BG_IMG = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.p
 const POINT_ALTITUDE = 0.01
 const RING_MAX_RADIUS = 3
 const RING_PROPAGATION_SPEED = 2
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Astronomically-referenced sun placement
+//
+//  Source: NASA Sun Fact Sheet (nssdc.gsfc.nasa.gov/planetary/factsheet/sunfact.html)
+//    • Earth equatorial radius:   6,371 km
+//    • Sun radius:              696,000 km  → 109.2 × Earth radius
+//    • Mean Earth–Sun distance: 149,600,000 km → 23,455 × Earth radius
+//    • Apparent angular diameter from Earth: 0.5332 ° (mean)
+//
+//  three-globe uses GLOBE_RADIUS = 100 for Earth, so we scale proportionally:
+//    • SUN_DISTANCE  = 100 × 235  = 23,500  (≈ real 23,455× ratio)
+//    • SUN_DISC_SIZE = 2 × SUN_DISTANCE × tan(0.5332° / 2) ≈ 219 units
+//      This makes the sun disc subtend the correct 0.533° from the origin.
+//    • SUN_GLOW_SIZE = SUN_DISC_SIZE × 3.2 ≈ 700 units  (simulated corona)
+// ─────────────────────────────────────────────────────────────────────────────
+const GLOBE_RADIUS = 100
+const SUN_DISTANCE = GLOBE_RADIUS * 235     // 23,500 — proportional to Earth–Sun distance
+const SUN_ANGULAR_DEG = 0.5332                 // apparent angular diameter in degrees (NASA)
+const SUN_DISC_SIZE = 2 * SUN_DISTANCE * Math.tan((SUN_ANGULAR_DEG / 2) * Math.PI / 180)
+// ≈ 219 units — correct apparent disc size
+const SUN_GLOW_SIZE = SUN_DISC_SIZE * 3.2     // ≈ 700 units — corona / bloom envelope
+
+// ── Procedural sun texture (radial gradient on canvas) ──
+function createSunTexture(size = 512, type = 'core') {
+    const canvas = document.createElement('canvas')
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext('2d')
+    const cx = size / 2
+    const grad = ctx.createRadialGradient(cx, cx, 0, cx, cx, cx)
+
+    if (type === 'core') {
+        // Tight bright disc — photospheric white/yellow
+        grad.addColorStop(0, 'rgba(255, 255, 252, 1.0)')
+        grad.addColorStop(0.25, 'rgba(255, 250, 235, 0.98)')
+        grad.addColorStop(0.5, 'rgba(255, 230, 180, 0.6)')
+        grad.addColorStop(0.75, 'rgba(255, 200, 120, 0.15)')
+        grad.addColorStop(1, 'rgba(255, 180, 80,  0.0)')
+    } else {
+        // Broad soft glow — solar corona
+        grad.addColorStop(0, 'rgba(255, 255, 240, 0.7)')
+        grad.addColorStop(0.08, 'rgba(255, 245, 210, 0.5)')
+        grad.addColorStop(0.2, 'rgba(255, 220, 160, 0.22)')
+        grad.addColorStop(0.45, 'rgba(255, 180, 80,  0.06)')
+        grad.addColorStop(0.7, 'rgba(255, 140, 40,  0.015)')
+        grad.addColorStop(1, 'rgba(255, 100, 0,   0.0)')
+    }
+
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, size, size)
+    return new CanvasTexture(canvas)
+}
+
+/**
+ * Convert sun geographic (lng, lat) → Three.js world position.
+ * Uses the same convention as three-globe's internal Polar2Cartesian:
+ *   phi   = (90 − lat) in radians
+ *   theta = (90 − lng) in radians
+ */
+function sunToWorldPos(sunLng, sunLat, distance = SUN_DISTANCE) {
+    const phi = (90 - sunLat) * Math.PI / 180
+    const theta = (90 - sunLng) * Math.PI / 180
+    return new Vector3(
+        Math.sin(phi) * Math.cos(theta) * distance,
+        Math.cos(phi) * distance,
+        Math.sin(phi) * Math.sin(theta) * distance,
+    )
+}
 
 // ── Day / Night shader (from globe.gl official example) ──
 const dayNightShader = {
@@ -101,6 +177,7 @@ export default function GlobeGLView({ onGlobeReady }) {
     const newsItems = useAtlasStore((s) => s.newsItems)
     const activeCategories = useAtlasStore((s) => s.activeCategories)
     const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
+    const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
     const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
 
     const getVisibleItems = useCallback(() => {
@@ -121,6 +198,9 @@ export default function GlobeGLView({ onGlobeReady }) {
 
         const globe = new Globe(container)
 
+        // Compute timezone-based spawn point
+        const homeView = getTimezoneViewCenter()
+
         // Size immediately
         globe
             .width(container.clientWidth)
@@ -131,6 +211,13 @@ export default function GlobeGLView({ onGlobeReady }) {
             .showAtmosphere(true)
             .atmosphereColor('rgba(0, 180, 255, 0.25)')
             .atmosphereAltitude(0.18)
+            .pointOfView({ lat: homeView.lat, lng: homeView.lng, altitude: 2.5 })
+
+        // Extend camera far plane so the sun (at ~23,500 units) isn't clipped
+        // Default Three.js far = 2,000 which is far too short
+        const camera = globe.camera()
+        camera.far = 50000
+        camera.updateProjectionMatrix()
 
         // Auto-rotate
         const controls = globe.controls()
@@ -148,6 +235,43 @@ export default function GlobeGLView({ onGlobeReady }) {
         }
         container.addEventListener('pointerdown', stopRotate)
         container.addEventListener('wheel', stopRotate)
+
+        // ── Three.js scene — add sun + lighting ──
+        const scene = globe.scene()
+
+        // Soft ambient fill so the night-side markers aren't invisible
+        const ambient = new AmbientLight(0x223355, 0.6)
+        scene.add(ambient)
+
+        // Hemisphere light — warm sky / cool ground for subtle colour variation
+        const hemi = new HemisphereLight(0xffeedd, 0x112244, 0.3)
+        scene.add(hemi)
+
+        // Directional light from the sun for 3D marker/ring illumination
+        const sunLight = new DirectionalLight(0xfff8f0, 1.8)
+        scene.add(sunLight)
+
+        // Visible sun — two additive-blended sprites: photospheric disc + corona glow
+        // Sized per NASA angular-diameter data (see constants above)
+        const sunCore = new Sprite(new SpriteMaterial({
+            map: createSunTexture(512, 'core'),
+            color: new Color(0xffffff),
+            transparent: true,
+            blending: AdditiveBlending,
+            depthWrite: false,
+        }))
+        sunCore.scale.set(SUN_DISC_SIZE, SUN_DISC_SIZE, 1)
+        scene.add(sunCore)
+
+        const sunGlow = new Sprite(new SpriteMaterial({
+            map: createSunTexture(512, 'glow'),
+            color: new Color(0xffeedd),
+            transparent: true,
+            blending: AdditiveBlending,
+            depthWrite: false,
+        }))
+        sunGlow.scale.set(SUN_GLOW_SIZE, SUN_GLOW_SIZE, 1)
+        scene.add(sunGlow)
 
         // ── Day/night shader material ──
         const loader = new TextureLoader()
@@ -168,28 +292,38 @@ export default function GlobeGLView({ onGlobeReady }) {
                 fragmentShader: dayNightShader.fragmentShader,
             })
 
-            globe
-                .globeMaterial(material)
-                // Track globe rotation for the shader
-                .onZoom(({ lng, lat }) => {
-                    material.uniforms.globeRotation.value.set(lng, lat)
-                })
+            globe.globeMaterial(material)
 
-            // Animate sun position in real-time (1 min per frame for visible movement)
-            let dt = +new Date()
-            const VELOCITY = 2 // minutes per frame
-
+            // Sync day/night + sun objects with real-world time
             function animate() {
                 if (destroyed) return
-                dt += VELOCITY * 60 * 1000
-                const [sunLng, sunLat] = sunPosAt(dt)
+
+                const [sunLng, sunLat] = sunPosAt(Date.now())
                 material.uniforms.sunPosition.value.set(sunLng, sunLat)
+
+                // Keep globeRotation uniform in sync with camera
+                const pov = globe.pointOfView()
+                if (pov) {
+                    material.uniforms.globeRotation.value.set(pov.lng ?? 0, pov.lat ?? 0)
+                }
+
+                // Move the visible sun + directional light to match
+                const sunWorldPos = sunToWorldPos(sunLng, sunLat)
+                sunCore.position.copy(sunWorldPos)
+                sunGlow.position.copy(sunWorldPos)
+                sunLight.position.copy(sunWorldPos)
+
+                // Subtle corona pulse (±5 % over ~6 s)
+                const pulse = 1 + 0.05 * Math.sin(Date.now() * 0.001)
+                sunGlow.scale.setScalar(SUN_GLOW_SIZE * pulse)
+
                 animFrameRef.current = requestAnimationFrame(animate)
             }
             animFrameRef.current = requestAnimationFrame(animate)
         })
 
         // ── Points layer ──
+        // pointsMerge MUST be false for per-point click/hover events to fire
         globe
             .pointsData([])
             .pointLat('lat')
@@ -197,8 +331,51 @@ export default function GlobeGLView({ onGlobeReady }) {
             .pointColor((d) => getCategoryColor(d.category))
             .pointAltitude(POINT_ALTITUDE)
             .pointRadius(0.35)
-            .pointsMerge(true)
-            .onPointClick((d) => setSelectedMarker(d))
+            .pointsMerge(false)
+            .onPointClick((d) => {
+                // Open the NewsCard (same as CesiumGlobe)
+                setSelectedMarker(d)
+                // Fly closer to the clicked marker
+                // altitude is in globe-radii: 2.5 = default view, 0.15 = very close
+                const currentAlt = globe.pointOfView().altitude ?? 2.5
+                const targetAlt = Math.max(0.15, Math.min(0.8, currentAlt * 0.4))
+                globe.pointOfView(
+                    { lat: d.lat, lng: d.lng, altitude: targetAlt },
+                    1400,
+                )
+            })
+            .onPointHover((d) => {
+                // Hover tooltip (RegionRing) — needs _screenX/_screenY
+                if (d) {
+                    // Globe.GL doesn't pass screen coords directly, so
+                    // read the current mouse position from the last pointermove
+                    const { _lastPointerX: sx, _lastPointerY: sy } = container
+                    setHoveredMarker({
+                        ...d,
+                        _screenX: sx ?? window.innerWidth / 2,
+                        _screenY: sy ?? window.innerHeight / 2,
+                    })
+                    container.style.cursor = 'pointer'
+                } else {
+                    setHoveredMarker(null)
+                    container.style.cursor = 'grab'
+                }
+            })
+
+        // Track mouse position on the container for hover tooltip coords
+        const onPointerMove = (e) => {
+            container._lastPointerX = e.clientX
+            container._lastPointerY = e.clientY
+        }
+        container.addEventListener('pointermove', onPointerMove)
+
+        // ── Globe background click — dismiss news card ──
+        globe.onGlobeClick(() => {
+            const store = useAtlasStore.getState()
+            if (store.selectedMarker) {
+                store.setSelectedMarker(null)
+            }
+        })
 
         // ── Rings layer ──
         globe
@@ -234,6 +411,16 @@ export default function GlobeGLView({ onGlobeReady }) {
 
         globeRef.current = globe
 
+        // ── Register reset-view callback (Header button) ──
+        useAtlasStore.getState().setOnResetView(() => {
+            const center = getTimezoneViewCenter()
+            globe.pointOfView({ lat: center.lat, lng: center.lng, altitude: 2.5 }, 1200)
+            // Re-enable auto-rotate and clear selection
+            const controls = globe.controls()
+            if (controls) controls.autoRotate = true
+            useAtlasStore.getState().setSelectedMarker(null)
+        })
+
         // Resize
         const onResize = () => {
             if (globeRef.current && containerRef.current) {
@@ -254,9 +441,12 @@ export default function GlobeGLView({ onGlobeReady }) {
             window.removeEventListener('resize', onResize)
             container.removeEventListener('pointerdown', stopRotate)
             container.removeEventListener('wheel', stopRotate)
+            container.removeEventListener('pointermove', onPointerMove)
+            setHoveredMarker(null)
             clearTimeout(idleTimerRef.current)
             clearTimeout(readyTimer)
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
+            useAtlasStore.getState().setOnResetView(null)
             if (globeRef.current) {
                 globeRef.current._destructor?.()
                 globeRef.current = null

@@ -10,6 +10,7 @@ import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from 'react-le
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useAtlasStore } from '../../store/atlasStore'
+import { getTimezoneViewCenter } from '../../utils/geo'
 import { getCategoryColor, CATEGORIES } from '../../utils/categoryColors'
 import { MOCK_NEWS } from '../../utils/mockData'
 
@@ -17,7 +18,9 @@ import { MOCK_NEWS } from '../../utils/mockData'
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
 
-const DEFAULT_CENTER = [20, 0]
+// Compute home center from the user's timezone (matches Cesium & Globe.GL spawn)
+const _home = getTimezoneViewCenter()
+const DEFAULT_CENTER = [_home.lat, _home.lng]
 const DEFAULT_ZOOM = 2.5
 const MIN_ZOOM = 2
 const MAX_ZOOM = 12
@@ -47,7 +50,8 @@ function ResetViewHandler() {
 
     useEffect(() => {
         setOnResetView(() => {
-            map.flyTo(DEFAULT_CENTER, DEFAULT_ZOOM, { duration: 1.2 })
+            const center = getTimezoneViewCenter()
+            map.flyTo([center.lat, center.lng], DEFAULT_ZOOM, { duration: 1.2 })
         })
         return () => setOnResetView(null)
     }, [map, setOnResetView])
