@@ -104,7 +104,11 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+    }
   }, [moreOpen, searchOpen])
 
   return (
@@ -259,7 +263,7 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.97 }}
             transition={{ duration: 0.2 }}
-            className="fixed top-14 right-6 z-50 w-[420px] glass rounded-xl p-4 shadow-2xl border border-white/[0.08] pointer-events-auto"
+            className="fixed top-14 right-3 z-50 w-[min(420px,calc(100vw-24px))] glass rounded-xl p-4 shadow-2xl border border-white/[0.08] pointer-events-auto"
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-white tracking-wide">Manage Sources</h3>

@@ -76,6 +76,7 @@ export default function ClockOverlay() {
   const dragMovedRef = useRef(false)
   const buttonRef = useRef(null)
   const selectedMarker = useAtlasStore((s) => s.selectedMarker)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -172,6 +173,25 @@ export default function ClockOverlay() {
   const handleToggleOpen = () => {
     if (dragMovedRef.current) return
     setOpen((v) => !v)
+  }
+
+  if (mobileMode) {
+    return (
+      <motion.div
+        className="fixed top-[42px] right-2 z-[35] pointer-events-auto"
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.5, duration: 0.4 }}
+      >
+        <div className="flex items-baseline gap-1.5 text-[9px] text-white/80 font-mono tracking-[0.14em] uppercase">
+          <span className="text-white/50">{shortTz}</span>
+          <span>{timeString}</span>
+        </div>
+        <div className="text-[7px] text-white/30 font-mono tracking-[0.14em] uppercase text-right">
+          {coordsLabel}
+        </div>
+      </motion.div>
+    )
   }
 
   /* z-[35]: stay below .hud-header (z-40) so ⋯ dropdown isn’t covered by clock/lat-lon text */

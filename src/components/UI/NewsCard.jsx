@@ -8,6 +8,7 @@ export default function NewsCard() {
   const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
   const openStreetView = useAtlasStore((s) => s.openStreetView)
   const openYouTubeEmbed = useAtlasStore((s) => s.openYouTubeEmbed)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
 
   return (
     <AnimatePresence>
@@ -18,7 +19,11 @@ export default function NewsCard() {
           animate={{ opacity: 1, x: 0, scale: 1 }}
           exit={{ opacity: 0, x: 30, scale: 0.95 }}
           transition={{ duration: 0.35, ease: 'easeOut' }}
-          className="fixed right-4 top-1/2 -translate-y-1/2 z-30 w-80"
+          className={`fixed z-30 ${
+            mobileMode
+              ? 'left-4 right-4 bottom-16 w-auto'
+              : 'right-4 top-1/2 -translate-y-1/2 w-80'
+          }`}
         >
           <div className="glass rounded-xl p-5 space-y-3">
             {/* Close button */}

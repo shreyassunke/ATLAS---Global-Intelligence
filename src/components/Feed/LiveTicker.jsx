@@ -22,6 +22,7 @@ export default function LiveTicker() {
   const events = useAtlasStore((s) => s.events)
   const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
   const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
   const scrollRef = useRef(null)
   const [feedOpen, setFeedOpen] = useState(false)
   const hoverTimer = useRef(null)
@@ -159,8 +160,8 @@ export default function LiveTicker() {
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 2, duration: 0.5 }}
       className="fixed bottom-0 left-0 right-0 z-30"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      onMouseEnter={mobileMode ? undefined : handleMouseEnter}
+      onMouseLeave={mobileMode ? undefined : handleMouseLeave}
     >
       <AnimatePresence>
         {feedOpen && (
@@ -172,8 +173,8 @@ export default function LiveTicker() {
             exit={{ opacity: 0, y: 40 }}
             transition={{ duration: 0.35, ease: [0.23, 1, 0.32, 1] }}
             className="feed-overlay"
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
+            onMouseEnter={mobileMode ? undefined : handleMouseEnter}
+            onMouseLeave={mobileMode ? undefined : handleMouseLeave}
           >
             <div className="feed-header">
               <div className="feed-header-left">
@@ -237,6 +238,15 @@ export default function LiveTicker() {
         )}
       </AnimatePresence>
 
+      {mobileMode && (
+        <button
+          onClick={() => setFeedOpen((v) => !v)}
+          className="absolute -top-8 left-1/2 -translate-x-1/2 z-10 bg-black/60 border border-white/10 rounded-full px-3 py-1 text-[8px] tracking-[0.2em] text-white/50 uppercase font-mono backdrop-blur-sm"
+        >
+          {feedOpen ? 'Close Feed' : 'Open Feed'}
+        </button>
+      )}
+
       <div className="glass border-t border-white/5 ticker-shell">
         <div className={`ticker-hover-line ${feedOpen ? 'active' : ''}`} />
         <div
@@ -272,7 +282,7 @@ export default function LiveTicker() {
                 {item.source}
               </span>
               <span
-                className="text-[12px] font-medium truncate max-w-[280px]"
+                className={`text-[12px] font-medium truncate ${mobileMode ? 'max-w-[180px]' : 'max-w-[280px]'}`}
                 style={{
                   color: item.tier === 'critical'
                     ? 'rgba(255, 80, 80, 0.95)'

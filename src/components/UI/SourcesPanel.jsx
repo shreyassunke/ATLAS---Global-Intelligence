@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import { SOURCE_CATALOG } from '../../core/sourceRegistry'
@@ -14,7 +14,22 @@ function timeAgo(ts) {
 
 export default function SourcesPanel({ open, onClose }) {
   const sourceStatuses = useAtlasStore((s) => s.sourceStatuses)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
   const [filter, setFilter] = useState('')
+  const panelRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleOutside(e) {
+      if (panelRef.current && !panelRef.current.contains(e.target)) onClose()
+    }
+    document.addEventListener('mousedown', handleOutside)
+    document.addEventListener('touchstart', handleOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('touchstart', handleOutside)
+    }
+  }, [open, onClose])
 
   const entries = Object.entries(SOURCE_CATALOG)
     .filter(([id, s]) => {
@@ -30,9 +45,14 @@ export default function SourcesPanel({ open, onClose }) {
     <AnimatePresence>
       {open && (
         <motion.div
+          ref={panelRef}
           key="sources-panel"
           className="settings-panel"
-          style={{ width: 380, right: 6, maxHeight: 'calc(100vh - 70px)' }}
+          style={{
+            width: mobileMode ? 'calc(100vw - 32px)' : 380,
+            right: mobileMode ? 16 : 6,
+            maxHeight: 'calc(100vh - 70px)',
+          }}
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 20 }}

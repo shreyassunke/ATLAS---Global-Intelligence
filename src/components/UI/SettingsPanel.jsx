@@ -46,7 +46,6 @@ export default function SettingsPanel() {
     const panelRef = useRef(null)
     const [alertsOpen, setAlertsOpen] = useState(false)
 
-    // Close on click outside
     useEffect(() => {
         if (!settingsOpen) return
         function handleClick(e) {
@@ -55,7 +54,11 @@ export default function SettingsPanel() {
             }
         }
         document.addEventListener('mousedown', handleClick)
-        return () => document.removeEventListener('mousedown', handleClick)
+        document.addEventListener('touchstart', handleClick)
+        return () => {
+            document.removeEventListener('mousedown', handleClick)
+            document.removeEventListener('touchstart', handleClick)
+        }
     }, [settingsOpen, setSettingsOpen])
 
     // Effective tier for display

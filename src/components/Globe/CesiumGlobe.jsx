@@ -1153,8 +1153,15 @@ export default function CesiumGlobe({ onGlobeReady }) {
 
     init()
 
+    const resizeObserver = new ResizeObserver(() => {
+      const v = viewerRef.current
+      if (v && !v.isDestroyed()) v.resize()
+    })
+    resizeObserver.observe(container)
+
     return () => {
       destroyed = true
+      resizeObserver.disconnect()
       clearTimeout(idleTimer.current)
       pointMapRef.current.clear()
       pointCollectionRef.current = null

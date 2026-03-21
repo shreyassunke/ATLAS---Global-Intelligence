@@ -1,5 +1,5 @@
 import { useAtlasStore } from '../../store/atlasStore'
-import { DOMAINS, TIER_COLORS } from '../../core/eventSchema'
+import { DOMAINS } from '../../core/eventSchema'
 
 const DOMAIN_DEFS = [
   { id: DOMAINS.CONFLICT, label: 'Conflict', icon: '⚔', color: '#ef4444' },
@@ -16,6 +16,80 @@ export default function DomainFilters() {
   const toggleDomain = useAtlasStore((s) => s.toggleDomain)
   const severityFloor = useAtlasStore((s) => s.severityFloor)
   const setSeverityFloor = useAtlasStore((s) => s.setSeverityFloor)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
+
+  if (mobileMode) {
+    return (
+      <div style={{ padding: '8px 12px' }}>
+        <div style={{
+          display: 'flex',
+          gap: 6,
+          overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          paddingBottom: 6,
+        }}>
+          {DOMAIN_DEFS.map((d) => {
+            const active = activeDomains.has(d.id)
+            return (
+              <button
+                key={d.id}
+                onClick={() => toggleDomain(d.id)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '6px 10px',
+                  border: `1px solid ${active ? d.color + '50' : 'rgba(255,255,255,0.08)'}`,
+                  borderRadius: 20,
+                  background: active ? d.color + '18' : 'transparent',
+                  whiteSpace: 'nowrap',
+                  fontFamily: 'var(--font-data)',
+                  fontSize: '9px',
+                  letterSpacing: '0.1em',
+                  color: active ? d.color : 'rgba(255,255,255,0.4)',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  minHeight: 36,
+                }}
+              >
+                {d.icon} {d.label}
+              </button>
+            )
+          })}
+        </div>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingTop: 6,
+          borderTop: '1px solid rgba(255,255,255,0.04)',
+        }}>
+          <span style={{
+            fontFamily: 'var(--font-hud)',
+            fontSize: '7px',
+            letterSpacing: '0.15em',
+            color: 'rgba(255,255,255,0.3)',
+            textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
+          }}>
+            Sev {severityFloor === 1 ? 'All' : severityFloor === 5 ? 'Crit' : `${severityFloor}+`}
+          </span>
+          <div style={{ display: 'flex', gap: 2, flex: 1 }}>
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                className={`settings-toggle-btn ${severityFloor === n ? 'active' : ''}`}
+                style={{ flex: 1, padding: '4px', fontSize: '10px', minHeight: 32 }}
+                onClick={() => setSeverityFloor(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{

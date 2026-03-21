@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import { supabase } from '../../services/supabase'
@@ -23,9 +23,24 @@ function emptyRule(user) {
 
 export default function AlertRulesPanel({ open, onClose }) {
   const user = useAtlasStore((s) => s.user)
+  const mobileMode = useAtlasStore((s) => s.mobileMode)
   const [rules, setRules] = useState([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const panelRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handleOutside(e) {
+      if (panelRef.current && !panelRef.current.contains(e.target)) onClose()
+    }
+    document.addEventListener('mousedown', handleOutside)
+    document.addEventListener('touchstart', handleOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('touchstart', handleOutside)
+    }
+  }, [open, onClose])
 
   useEffect(() => {
     if (!open || !user || !supabase) return
@@ -84,12 +99,17 @@ export default function AlertRulesPanel({ open, onClose }) {
     <AnimatePresence>
       {open && (
         <motion.div
+          ref={panelRef}
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 20 }}
           transition={{ duration: 0.22 }}
-          className="fixed top-[50px] right-[6px] z-[60] w-[340px] max-h-[80vh] overflow-y-auto
-                     bg-[rgba(8,12,24,0.96)] border border-white/[0.08] backdrop-blur-xl"
+          className={`fixed top-[50px] z-[60] max-h-[80vh] overflow-y-auto
+                     bg-[rgba(8,12,24,0.96)] border border-white/[0.08] backdrop-blur-xl ${
+                       mobileMode
+                         ? 'left-4 right-4 w-auto'
+                         : 'right-[6px] w-[340px]'
+                     }`}
           style={{ fontFamily: 'var(--font-data)' }}
         >
           {/* Header */}

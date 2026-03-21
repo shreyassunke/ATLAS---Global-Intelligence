@@ -245,6 +245,7 @@ export default function Onboarding({ sunAngle = 0 }) {
               transition={{ duration: 0.6, ease: 'easeOut' }}
               className="atlas-logo"
               onMouseEnter={decodeAll}
+              onTouchStart={decodeAll}
               role="img"
               aria-label="ATLAS"
             >
@@ -301,6 +302,7 @@ export default function Onboarding({ sunAngle = 0 }) {
             transition={{ duration: 0.6, ease: 'easeOut' }}
             className="atlas-logo"
             onMouseEnter={decodeAll}
+            onTouchStart={decodeAll}
             role="img"
             aria-label="ATLAS"
           >
