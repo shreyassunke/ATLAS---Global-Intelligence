@@ -506,7 +506,8 @@ export default function CesiumGlobe({ onGlobeReady }) {
       scene.fog.enabled = eff('fog')
       scene.fog.density = 0.0006
       scene.fog.maxHeight = 60_000_000.0
-      scene.fog.minimumBrightness = 0.03
+      // Slightly higher floor so the night limb isn’t a pure black smear next to space
+      scene.fog.minimumBrightness = 0.045
       scene.fog.heightScalar = 0.001
       scene.fog.heightFalloff = 0.59
       scene.fog.visualDensityScalar = 0.15
@@ -577,47 +578,75 @@ export default function CesiumGlobe({ onGlobeReady }) {
       }
 
       // ---------------------------------------------------------------
-      //  Night lights (globe.gl-style) — NASA Black Marble
+      //  Night lights — NASA Black Marble (city glow) over dimmed day imagery
+      //  • Too little base nightAlpha → flat navy “void”; too much → washes out lights.
+      //  • Ion 3812, else GIBS REST WMTS. Markers are separate primitives.
       // ---------------------------------------------------------------
+      const nightLayerOpts = {
+        show: true,
+        alpha: 1.0,
+        dayAlpha: 0.0,
+        nightAlpha: 1.0,
+        brightness: 2.2,
+        contrast: 1.3,
+        saturation: 1.18,
+        // Slightly lift shadows so coasts / cities aren’t a solid blue slab
+        gamma: 0.86,
+      }
+
       let lightsLayer = null
-      if (ION_TOKEN && eff('nightLights')) {
-        try {
-          const blackMarbleProvider = await Cesium.IonImageryProvider.fromAssetId(3812)
-          if (!destroyed) {
-            lightsLayer = viewer.imageryLayers.addImageryProvider(blackMarbleProvider)
+      if (eff('nightLights')) {
+        const addNightLayer = (layer) => {
+          if (destroyed || !layer) return
+          viewer.imageryLayers.add(layer)
+          try {
+            viewer.imageryLayers.raiseToTop(layer)
+          } catch {
+            /* ignore */
           }
-        } catch (e) {
-          console.warn('Cesium ion Black Marble (3812) failed, using NASA GIBS fallback:', e?.message || e)
+          lightsLayer = layer
         }
-      }
-      if (!lightsLayer && eff('nightLights')) {
-        try {
-          const gibsProvider = new Cesium.WebMapTileServiceImageryProvider({
-            url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/wmts.cgi',
-            layer: 'VIIRS_Black_Marble',
-            style: 'default',
-            format: 'image/jpeg',
-            tileMatrixSetID: 'GoogleMapsCompatible_Level9',
-            maximumLevel: 8,
-            credit: 'NASA GIBS',
-          })
-          lightsLayer = viewer.imageryLayers.addImageryProvider(gibsProvider)
-        } catch (e) {
-          console.warn('Night lights unavailable:', e?.message || e)
+
+        if (ION_TOKEN) {
+          try {
+            const ionLayer = await Cesium.ImageryLayer.fromProviderAsync(
+              Cesium.IonImageryProvider.fromAssetId(3812),
+              nightLayerOpts,
+            )
+            addNightLayer(ionLayer)
+          } catch (e) {
+            console.warn('ATLAS: Ion Earth at Night / Black Marble (3812) failed:', e?.message || e)
+          }
         }
-      }
-      if (lightsLayer) {
-        lightsLayer.show = true
-        lightsLayer.alpha = 1.0
-        lightsLayer.brightness = 2.5
-        lightsLayer.contrast = 1.5
-        lightsLayer.dayAlpha = 0.0
-        lightsLayer.nightAlpha = 1.0
-        layerRefs.current.lightsLayer = lightsLayer
-        const baseLayer = viewer.imageryLayers.get(0)
-        if (baseLayer && baseLayer !== lightsLayer) {
-          baseLayer.dayAlpha = 1.0
-          baseLayer.nightAlpha = 0.4
+
+        if (!lightsLayer) {
+          try {
+            const gibs = new Cesium.WebMapTileServiceImageryProvider({
+              url:
+                'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/GoogleMapsCompatible_Level9/{TileMatrix}/{TileRow}/{TileCol}.jpg',
+              layer: 'VIIRS_Black_Marble',
+              style: 'default',
+              format: 'image/jpeg',
+              tileMatrixSetID: 'GoogleMapsCompatible_Level9',
+              maximumLevel: 8,
+              credit: 'NASA GIBS — VIIRS Black Marble',
+            })
+            const gibsLayer = new Cesium.ImageryLayer(gibs, nightLayerOpts)
+            addNightLayer(gibsLayer)
+          } catch (e) {
+            console.warn('ATLAS: GIBS Black Marble (REST WMTS) failed:', e?.message || e)
+          }
+        }
+
+        if (lightsLayer) {
+          layerRefs.current.lightsLayer = lightsLayer
+          const baseLayer = viewer.imageryLayers.get(0)
+          if (baseLayer && baseLayer !== lightsLayer) {
+            baseLayer.dayAlpha = 1.0
+            // Blend: keep enough base texture on the night side for land/ocean read-through
+            // (0.14 looked like a dead flat navy). ~0.45 matches globe.gl-style balance with BM.
+            baseLayer.nightAlpha = 0.45
+          }
         }
       }
 

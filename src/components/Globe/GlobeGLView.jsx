@@ -6,6 +6,11 @@
  * Includes a visible Three.js sun (sprite + directional light) that
  * tracks the real solar position, matching CesiumJS's sun appearance.
  *
+ * Map context (closer to Cesium): Natural Earth country + state/province
+ * outlines (paths layer), and Carto `light_only_labels` raster tiles
+ * (second SlippyMap shell) for place/country typography. District-level
+ * vector boundaries are omitted by default (very heavy GeoJSON).
+ *
  * Day/night cycle reference: https://globe.gl/example/day-night-cycle/
  */
 import { useEffect, useRef, useCallback } from 'react'
@@ -15,7 +20,9 @@ import {
     DirectionalLight, AmbientLight, HemisphereLight,
     Sprite, SpriteMaterial, CanvasTexture,
     AdditiveBlending, Color,
+    MeshBasicMaterial,
 } from 'three'
+import SlippyMap from 'three-slippy-map-globe'
 import * as solar from 'solar-calculator'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
@@ -26,6 +33,19 @@ const EARTH_DAY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-da
 const EARTH_NIGHT = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg'
 const EARTH_BUMP = 'https://unpkg.com/three-globe/example/img/earth-topology.png'
 const BG_IMG = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png'
+
+/**
+ * Carto label-only tiles. `dark_only_labels` is for dark basemaps and disappears on bright
+ * satellite / day-side terrain — `light_only_labels` uses dark glyphs, readable on imagery.
+ */
+const CARTO_LABEL_TILE_URL = (x, y, l) =>
+    `https://basemaps.cartocdn.com/light_only_labels/${l}/${x}/${y}@2x.png`
+
+/** Natural Earth — country / first-order admin lines (same sources as Cesium) */
+const NE_ADMIN0_LINES =
+    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_boundary_lines_land.geojson'
+const NE_ADMIN1_LINES =
+    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_1_states_provinces_lines.geojson'
 
 const POINT_ALTITUDE = 0.01
 const RING_MAX_RADIUS = 3
@@ -165,6 +185,33 @@ function sunPosAt(dt) {
     return [longitude - solar.equationOfTime(t) / 4, solar.declination(t)]
 }
 
+/**
+ * GeoJSON LineString / MultiLineString → globe.gl paths ({ coords: [lat,lng][] }).
+ * GeoJSON uses [lng, lat]; three-globe paths use [lat, lng] per point.
+ */
+function geoJsonLineFeaturesToPaths(geojson, color) {
+    const out = []
+    const pushLine = (lineCoords) => {
+        if (!lineCoords?.length) return
+        const coords = lineCoords.map(([lng, lat]) => [lat, lng])
+        if (coords.length < 2) return
+        out.push({ coords, color })
+    }
+    const handleGeom = (geom) => {
+        if (!geom) return
+        if (geom.type === 'LineString') pushLine(geom.coordinates)
+        else if (geom.type === 'MultiLineString') {
+            for (const line of geom.coordinates) pushLine(line)
+        }
+    }
+    if (geojson.type === 'FeatureCollection') {
+        for (const f of geojson.features ?? []) handleGeom(f.geometry)
+    } else if (geojson.type === 'Feature') {
+        handleGeom(geojson.geometry)
+    }
+    return out
+}
+
 export default function GlobeGLView({ onGlobeReady }) {
     const containerRef = useRef(null)
     const globeRef = useRef(null)
@@ -277,6 +324,9 @@ export default function GlobeGLView({ onGlobeReady }) {
         sunGlow.scale.set(SUN_GLOW_SIZE, SUN_GLOW_SIZE, 1)
         scene.add(sunGlow)
 
+        // Carto label-tile overlay (initialised below; animate() needs the reference)
+        let labelTileLayer = null
+
         // ── Day/night shader material ──
         const loader = new TextureLoader()
         Promise.all([
@@ -320,6 +370,27 @@ export default function GlobeGLView({ onGlobeReady }) {
                 // Subtle corona pulse (±5 % over ~6 s)
                 const pulse = 1 + 0.05 * Math.sin(Date.now() * 0.001)
                 sunGlow.scale.setScalar(SUN_GLOW_SIZE * pulse)
+
+                // Raster map labels (Carto) — keep tile LOD in sync with the camera
+                if (labelTileLayer) {
+                    labelTileLayer.updatePov(camera)
+                    labelTileLayer.traverse((o) => {
+                        if (!o.isMesh || !o.material?.map || o.userData.atlasLabelMatDone) return
+                        o.userData.atlasLabelMatDone = true
+                        // SlippyMap defaults to MeshLambertMaterial — scene lights wash out / crush
+                        // raster labels. Unlit basic material keeps Carto PNGs readable.
+                        const map = o.material.map
+                        o.material.dispose()
+                        o.material = new MeshBasicMaterial({
+                            map,
+                            transparent: true,
+                            depthWrite: false,
+                            depthTest: true,
+                            toneMapped: false,
+                        })
+                        o.renderOrder = 5
+                    })
+                }
 
                 animFrameRef.current = requestAnimationFrame(animate)
             }
@@ -401,7 +472,69 @@ export default function GlobeGLView({ onGlobeReady }) {
             .ringRepeatPeriod(() => 2000 + Math.random() * 2000)
             .ringAltitude(POINT_ALTITUDE)
 
-        // ── Labels layer ──
+        // ── Political boundaries (Natural Earth → paths), lazy-loaded — parity with Cesium
+        globe
+            .pathsData([])
+            .pathPoints('coords')
+            .pathPointAlt(0.008)
+            .pathResolution(0.45)
+            .pathColor((d) => d.color)
+            // FatLine pathStroke uses LineMaterial linewidth in *pixels*; values like 0.12 are
+            // sub-pixel and invisible. Use default thin GL lines (≈1px) — clearly visible.
+            .pathStroke(() => null)
+
+        const tierAtInit = useAtlasStore.getState().resolvedTier
+        const includeStateBorders = tierAtInit !== 'low'
+
+        let mapOutlinesLoaded = false
+        const loadMapOutlines = async () => {
+            if (destroyed || mapOutlinesLoaded) return
+            try {
+                const admin0Res = await fetch(NE_ADMIN0_LINES)
+                const admin0 = await admin0Res.json()
+                const paths = [
+                    ...geoJsonLineFeaturesToPaths(admin0, 'rgba(255, 255, 255, 0.82)'),
+                ]
+                if (includeStateBorders) {
+                    const admin1Res = await fetch(NE_ADMIN1_LINES)
+                    const admin1 = await admin1Res.json()
+                    paths.push(
+                        ...geoJsonLineFeaturesToPaths(
+                            admin1,
+                            'rgba(160, 205, 255, 0.55)',
+                        ),
+                    )
+                }
+                if (!destroyed) {
+                    mapOutlinesLoaded = true
+                    globe.pathsData(paths)
+                }
+            } catch {
+                /* network / CORS */
+            }
+        }
+        // Load soon (requestIdleCallback alone can starve on a busy main thread)
+        setTimeout(loadMapOutlines, 400)
+
+        // ── Carto label tiles (slippy overlay) — same idea as Cesium `dark_only_labels` ──
+        // three-globe hides its built-in tile engine when using a custom globeMaterial; we add a
+        // second SlippyMap slightly above the surface so day/night shading stays on the base mesh.
+        if (tierAtInit !== 'low') {
+            const labelMaxLevel = tierAtInit === 'medium' ? 5 : 6
+            labelTileLayer = new SlippyMap(GLOBE_RADIUS * 1.004, {
+                tileUrl: CARTO_LABEL_TILE_URL,
+                minLevel: 0,
+                maxLevel: labelMaxLevel,
+            })
+            // Match three-globe’s built-in tile engine (sibling to globe mesh): no extra Y rotation.
+            // globe.gl paths/points share this frame; −π/2 was misaligning label tiles.
+            labelTileLayer.curvatureResolution = 4
+            // Hide the library’s protective black inner sphere so transparent label pixels show Earth.
+            if (labelTileLayer.children[0]) labelTileLayer.children[0].visible = false
+            scene.add(labelTileLayer)
+        }
+
+        // ── Labels layer (per-marker titles for news — separate from map typography) ──
         globe
             .labelsData([])
             .labelLat('lat')
@@ -450,6 +583,11 @@ export default function GlobeGLView({ onGlobeReady }) {
             clearTimeout(readyTimer)
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
             useAtlasStore.getState().setOnResetView(null)
+            if (labelTileLayer) {
+                labelTileLayer.clearTiles?.()
+                scene.remove(labelTileLayer)
+                labelTileLayer = null
+            }
             if (globeRef.current) {
                 globeRef.current._destructor?.()
                 globeRef.current = null

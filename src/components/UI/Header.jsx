@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import SourceSearch from '../Onboarding/SourceSearch'
 import HeaderUserMenu from './HeaderUserMenu'
+import HeaderAudioVisualizer from './HeaderAudioVisualizer'
+import BgmTrackMenu from './BgmTrackMenu'
 
 const IconFilter = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -75,6 +77,26 @@ const IconSetup = () => (
   </svg>
 )
 
+/** Hover tooltips (title) + accessible names with live counts */
+const TIER_HELP = {
+  latent: {
+    title:
+      'Latent — early-stage or background intel: lower-urgency signals to track before they escalate.',
+    aria: (n) =>
+      `Latent tier: ${n} items. Early-stage or background intel, lower urgency.`,
+  },
+  active: {
+    title: 'Active — ongoing developments that currently need monitoring or follow-up.',
+    aria: (n) => `Active tier: ${n} items. Ongoing developments to monitor.`,
+  },
+  critical: {
+    title:
+      'Critical — highest-priority, time-sensitive intel that may require immediate attention.',
+    aria: (n) =>
+      `Critical tier: ${n} items. Highest-priority intel; may require immediate action.`,
+  },
+}
+
 export default function Header({ hudHidden = false, onToggleHud, onToggleSources, onToggleFilters, filtersOpen }) {
   const isLoading = useAtlasStore((s) => s.isLoading)
   const toggleSettings = useAtlasStore((s) => s.toggleSettings)
@@ -114,52 +136,75 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
 
   return (
     <>
+      <BgmTrackMenu />
       <motion.header
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1.5, duration: 0.6 }}
         className="hud-header"
       >
-        {/* Left: Logo + status */}
-        <div className="hud-header-left">
-          <h1 className="atlas-logo atlas-logo-header" role="img" aria-label="ATLAS">
-            {['A', 'T', 'L', 'A', 'S'].map((letter, i) => (
-              <div key={i} className="atlas-letter-wrap">
-                <span className="atlas-letter" aria-hidden>{letter}</span>
-              </div>
-            ))}
-          </h1>
+        {/* Left: logo + status + audio viz (grid col 1 — balances col 3 for true center pills) */}
+        <div className="hud-header-left-zone">
+          <div className="hud-header-left">
+            <h1 className="atlas-logo atlas-logo-header" role="img" aria-label="ATLAS">
+              {['A', 'T', 'L', 'A', 'S'].map((letter, i) => (
+                <div key={i} className="atlas-letter-wrap">
+                  <span className="atlas-letter" aria-hidden>{letter}</span>
+                </div>
+              ))}
+            </h1>
 
-          <div className="hud-api-pill" title={`${connectedCount} of ${totalSources} intel sources connected`}>
-            <div className={`hud-api-dot ${connectedCount > 0 ? 'connected' : 'error'}`} />
-            <span>{connectedCount}/{totalSources}</span>
+            <div className="hud-api-pill" title={`${connectedCount} of ${totalSources} intel sources connected`}>
+              <div className={`hud-api-dot ${connectedCount > 0 ? 'connected' : 'error'}`} />
+              <span>{connectedCount}/{totalSources}</span>
+            </div>
+
+            {isLoading && (
+              <span className="hud-loading-pulse">Syncing</span>
+            )}
           </div>
 
-          {isLoading && (
-            <span className="hud-loading-pulse">Syncing</span>
-          )}
+          <div className="hud-header-wave-slot">
+            <HeaderAudioVisualizer />
+          </div>
         </div>
 
-        {/* Center: Tier counts */}
+        {/* Tier counts — centered in full header (grid col 2) */}
         <div className="hud-header-center">
           <div className="hud-tier-counts">
-            <div className="hud-tier latent" title="Latent events">
-              <span className="hud-tier-shape">●</span>
-              <span>{tierCounts.latent}</span>
+            <div
+              className="hud-tier latent"
+              title={TIER_HELP.latent.title}
+              aria-label={TIER_HELP.latent.aria(tierCounts.latent)}
+            >
+              <span className="hud-tier-shape" aria-hidden>●</span>
+              <span aria-hidden>{tierCounts.latent}</span>
             </div>
-            <div className="hud-tier active" title="Active events">
-              <span className="hud-tier-shape">◆</span>
-              <span>{tierCounts.active}</span>
+            <div
+              className="hud-tier active"
+              title={TIER_HELP.active.title}
+              aria-label={TIER_HELP.active.aria(tierCounts.active)}
+            >
+              <span className="hud-tier-shape" aria-hidden>◆</span>
+              <span aria-hidden>{tierCounts.active}</span>
             </div>
-            <div className="hud-tier critical" title="Critical events">
-              <span className="hud-tier-shape">★</span>
-              <span>{tierCounts.critical}</span>
+            <div
+              className="hud-tier critical"
+              title={TIER_HELP.critical.title}
+              aria-label={TIER_HELP.critical.aria(tierCounts.critical)}
+            >
+              <span className="hud-tier-shape" aria-hidden>★</span>
+              <span aria-hidden>{tierCounts.critical}</span>
             </div>
           </div>
         </div>
 
-        {/* Right: Icon actions */}
-        <div className="hud-header-right">
+        {/* Right: matching audio viz (mirrored) + icon actions — grid col 3 */}
+        <div className="hud-header-right-zone">
+          <div className="hud-header-wave-slot hud-header-wave-slot--pair">
+            <HeaderAudioVisualizer mirrored />
+          </div>
+          <div className="hud-header-right">
           <button
             onClick={onToggleFilters}
             className={`hud-icon-btn ${filtersOpen ? 'active' : ''}`}
@@ -253,6 +298,7 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
                 </motion.div>
               )}
             </AnimatePresence>
+          </div>
           </div>
         </div>
       </motion.header>

@@ -4,9 +4,32 @@ import { CATEGORY_KEYS } from '../utils/categoryColors'
 import { loadQualitySettings, saveQualitySettings, loadGlobeMode, saveGlobeMode, QUALITY_TIERS } from '../config/qualityTiers'
 import { initEventBus, startFetching, stopFetching, subscribeToBatchUpdates, subscribeToSourceStatus, destroyEventBus } from '../core/eventBus'
 import { supabase } from '../services/supabase'
+import { loadPersistedBgmTrackId, persistBgmTrackId, BGM_AMBIENT_TRACKS } from '../config/bgmTracks'
 
 const STORAGE_KEY_SOURCES = 'atlas_selected_sources'
 const STORAGE_KEY_ONBOARDED = 'atlas_onboarded'
+const STORAGE_KEY_BGM_VOL = 'atlas_bgm_volume'
+
+function loadPersistedBgmVolume() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_BGM_VOL)
+    if (raw != null) {
+      const n = parseFloat(raw)
+      if (!Number.isNaN(n)) return Math.max(0, Math.min(1, n))
+    }
+  } catch {
+    /* ignore */
+  }
+  return 0.65
+}
+
+function persistBgmVolume(v) {
+  try {
+    localStorage.setItem(STORAGE_KEY_BGM_VOL, String(v))
+  } catch {
+    /* ignore */
+  }
+}
 
 function migrateSources(raw) {
   if (!Array.isArray(raw)) return DEFAULT_SOURCES
@@ -59,6 +82,13 @@ export const useAtlasStore = create((set, get) => ({
   isStreetViewOpen: false,
   /** { videoId, title, url, isLive } | null — when set, YouTube embed overlay is shown */
   youtubeEmbed: null,
+
+  /** Background music: ambient loop track id (see `config/bgmTracks.js`) */
+  bgmAmbientTrackId: loadPersistedBgmTrackId(),
+  /** `{ x, y }` client coords — null when the track picker is closed */
+  bgmTrackMenu: null,
+  /** Background music output level 0–1 (intro + ambient), persisted */
+  bgmVolume: loadPersistedBgmVolume(),
   manualRefreshUsedToday: false,
   triggerManualRefresh: null,
   launchTransitionActive: false,
@@ -170,6 +200,23 @@ export const useAtlasStore = create((set, get) => ({
       isStreetViewOpen: false,
     })),
   closeYouTubeEmbed: () => set({ youtubeEmbed: null }),
+
+  setBgmAmbientTrackId: (id) => {
+    if (!BGM_AMBIENT_TRACKS.some((t) => t.id === id)) return
+    persistBgmTrackId(id)
+    set({ bgmAmbientTrackId: id })
+  },
+
+  openBgmTrackMenu: (x, y) => set({ bgmTrackMenu: { x, y } }),
+  closeBgmTrackMenu: () => set({ bgmTrackMenu: null }),
+
+  setBgmVolume: (v) => {
+    const n = typeof v === 'number' ? v : parseFloat(v)
+    if (Number.isNaN(n)) return
+    const clamped = Math.max(0, Math.min(1, n))
+    persistBgmVolume(clamped)
+    set({ bgmVolume: clamped })
+  },
 
   // ── Quality & Globe Mode Setters ──
   setGlobeMode: (mode) => {
