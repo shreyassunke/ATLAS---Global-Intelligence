@@ -98,12 +98,12 @@ export default function AuthStep() {
   }
 
   return (
-    <div className="flex flex-col items-stretch w-full">
+    <div className="flex flex-col items-center justify-center w-full">
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
-        className="auth-step-minimal w-full max-w-md mx-auto flex flex-col items-stretch gap-10"
+        className="auth-step-minimal w-full flex flex-col items-stretch gap-10"
       >
         {/* Google — single soft pill, no stroke box */}
         <button

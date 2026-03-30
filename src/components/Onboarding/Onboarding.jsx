@@ -238,20 +238,20 @@ export default function Onboarding({ sunAngle = 0 }) {
     return (
       <div
         ref={lightroomRef}
-        className="onboarding-shell relative w-full h-full min-h-0 min-h-[100dvh] flex flex-col items-stretch overflow-y-auto overflow-x-hidden bg-transparent"
+        className="onboarding-shell relative w-full min-h-[100dvh] flex flex-col items-center justify-center overflow-y-auto overflow-x-hidden bg-transparent"
         style={{ '--spot-x': '50vw', '--spot-y': '50vh' }}
       >
         <GlassFilter />
         <div className="onboarding-lightroom" aria-hidden />
-        <main className="onboarding-page onboarding-page--auth relative z-10 w-full flex flex-col flex-1 min-h-0 px-6 sm:px-10 pt-[max(1.5rem,env(safe-area-inset-top,0px)+0.75rem)] pb-[max(2rem,env(safe-area-inset-bottom,0px)+1rem)]">
-          <div className="w-full max-w-xl mx-auto flex flex-col gap-10 my-auto shrink-0">
-            <header className="text-center">
+        <main className="onboarding-page onboarding-page--auth relative z-10 w-full max-w-md flex flex-col justify-center items-center flex-1 px-6 sm:px-10 py-12">
+          <div className="w-full flex flex-col items-center gap-10 shrink-0 mt-8 mb-auto">
+            <header className="text-center w-full flex flex-col items-center">
               <motion.button
                 type="button"
                 initial={{ opacity: 0, y: -6 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, ease: 'easeOut' }}
-                className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit"
+                className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit mb-6"
                 onMouseEnter={decodeAll}
                 onTouchStart={decodeAll}
                 onClick={reopenLanding}
@@ -281,7 +281,7 @@ export default function Onboarding({ sunAngle = 0 }) {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.3, duration: 0.5 }}
-                className="mt-3 text-[10px] sm:text-[11px] tracking-[0.5em] text-white/30 uppercase"
+                className="mt-6 text-[10px] sm:text-[11px] tracking-[0.5em] text-white/30 uppercase"
               >
                 Global Intelligence Platform
               </motion.p>
@@ -297,21 +297,21 @@ export default function Onboarding({ sunAngle = 0 }) {
   return (
     <div
       ref={lightroomRef}
-      className="onboarding-shell relative w-full h-full min-h-0 min-h-[100dvh] flex flex-col items-stretch overflow-y-auto overflow-x-hidden bg-transparent"
+      className="onboarding-shell relative w-full min-h-[100dvh] flex flex-col items-center justify-start overflow-y-auto overflow-x-hidden bg-transparent"
       style={{ '--spot-x': '50vw', '--spot-y': '50vh' }}
     >
       <GlassFilter />
       <div className="onboarding-lightroom" aria-hidden />
 
-      <main className="onboarding-page onboarding-page--setup relative z-10 w-full max-w-5xl mx-auto px-6 sm:px-10 lg:px-12 flex flex-col flex-1 min-h-0 pt-[max(2.75rem,env(safe-area-inset-top,0px)+1.75rem)] sm:pt-[max(3.25rem,env(safe-area-inset-top,0px)+2.25rem)] pb-[max(7rem,env(safe-area-inset-bottom,0px)+3rem)]">
+      <main className="onboarding-page onboarding-page--setup relative z-10 w-full max-w-4xl px-6 sm:px-10 lg:px-12 flex flex-col flex-1 pb-24 pt-16 sm:pt-20 items-center">
         {/* Header — ATLAS logo with glitch/decode animation */}
-        <header className="text-center mb-10 sm:mb-12 shrink-0">
+        <header className="text-center mb-10 w-full flex flex-col items-center sm:mb-12 shrink-0">
           <motion.button
             type="button"
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: 'easeOut' }}
-            className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit"
+            className="atlas-logo atlas-logo--modern border-0 bg-transparent p-0 cursor-pointer text-inherit mb-6"
             onMouseEnter={decodeAll}
             onTouchStart={decodeAll}
             onClick={reopenLanding}
@@ -341,7 +341,7 @@ export default function Onboarding({ sunAngle = 0 }) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.3, duration: 0.5 }}
-            className="mt-3 text-[10px] sm:text-[11px] tracking-[0.5em] text-white/30 uppercase"
+            className="mt-6 text-[10px] sm:text-[11px] tracking-[0.5em] text-white/30 uppercase"
           >
             Configure your intelligence feeds
           </motion.p>
@@ -397,7 +397,7 @@ export default function Onboarding({ sunAngle = 0 }) {
         </motion.button>
 
         {/* Regions — template style: vertical bar, name, Show/count, chevron; dropdown = list of checkbox rows */}
-        <div className="flex flex-col gap-0">
+        <div className="flex flex-col gap-0 w-full max-w-3xl">
           {REGION_ORDER.map((region, ri) => {
             const selectedInRegion = groupedSelected[region] || []
             const catalogInRegion = catalogByRegion[region] || []

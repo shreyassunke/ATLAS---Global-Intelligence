@@ -13,12 +13,30 @@ const LANDING_NAV = [
 ]
 
 const fadeUp = {
-  hidden: { opacity: 0, y: 20 },
+  hidden: { opacity: 0, y: 36 },
   show: (i) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: 0.05 * i, duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+    transition: {
+      delay: 0.9 + (i * 0.14),
+      duration: 0.9,
+      ease: [0.16, 1, 0.3, 1],
+    },
   }),
+}
+
+// The whole block rises up together from below after the globe settles
+const blockRise = {
+  hidden: { opacity: 0, y: 52 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      delay: 0.5,
+      duration: 1.1,
+      ease: [0.16, 1, 0.3, 1],
+    },
+  },
 }
 
 export default function LandingPage() {
@@ -107,49 +125,57 @@ export default function LandingPage() {
       </header>
 
       <main className="relative z-10 stitch-landing__content landing-main-over-globe">
-        <section className="stitch-hero stitch-hero--center-sm stitch-hero--fold">
-          <div className="stitch-hero__copy landing-hit-target mx-auto lg:mx-0 w-full flex flex-col flex-1 min-h-0">
+        <section className="stitch-hero stitch-hero--fold">
+          {/* Spacer — lets globe dominate the upper viewport */}
+          <div className="flex-1 min-h-0" aria-hidden />
+          {/* ── Hero copy: centered, bottom-anchored, rises up on load ── */}
+          <motion.div
+            className="stitch-hero__copy landing-hit-target flex flex-col items-center text-center"
+            variants={blockRise}
+            initial="hidden"
+            animate="show"
+          >
             <motion.p
               custom={0}
               variants={fadeUp}
               initial="hidden"
               animate="show"
-              className="stitch-eyebrow font-[family-name:var(--font-ui)] text-[11px] sm:text-xs tracking-[0.25em] uppercase text-sky-400/90 mb-4"
+              className="stitch-eyebrow"
             >
-              Global intelligence
+              Global Intelligence
             </motion.p>
             <motion.h1
               custom={1}
               variants={fadeUp}
               initial="hidden"
               animate="show"
-              className="font-[family-name:var(--font-ui)] font-bold text-white tracking-tight stitch-hero-title text-center lg:text-left leading-[1.12]"
+              className="stitch-hero-title mt-3"
             >
-              Every signal. Every source. One living globe.
+              Every signal. One living globe.
             </motion.h1>
             <motion.p
               custom={2}
               variants={fadeUp}
               initial="hidden"
               animate="show"
-              className="mt-4 text-[#9ca3af] text-sm sm:text-base leading-relaxed font-[family-name:var(--font-ui)] max-w-prose mx-auto lg:mx-0"
+              className="stitch-hero-body mt-5"
             >
-              Open-source intel on a living globe — then dive into setup and your feeds. Spin the globe and click the
-              markers to discover features and who ATLAS is for.
+              Open-source intelligence, visualized in real time.
             </motion.p>
             <motion.div
               custom={3}
               variants={fadeUp}
               initial="hidden"
               animate="show"
-              className="mt-8 flex justify-center lg:justify-start"
+              className="mt-16"
             >
-              <button type="button" onClick={enterApp} className="stitch-btn-primary stitch-btn-primary--hero">
-                Get started
+              <button type="button" onClick={enterApp} className="stitch-btn-ghost" id="hero-cta">
+                <span className="stitch-btn-ghost__text">{hasCompletedOnboarding ? 'Enter Atlas' : 'Get Started'}</span>
+                <span className="stitch-btn-ghost__arrow" aria-hidden>→</span>
               </button>
             </motion.div>
-          </div>
-          <div className="stitch-hero__scroll-wrap landing-hit-target flex justify-center pt-6 pb-2">
+          </motion.div>
+          <div className="stitch-hero__scroll-wrap landing-hit-target flex justify-center pt-10 pb-4">
             <button
               type="button"
               className="stitch-hero-scroll-cue"
@@ -166,56 +192,218 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section
-          id="cta-join"
-          className="stitch-cta-band rounded-2xl sm:rounded-3xl px-5 sm:px-8 py-10 sm:py-12 md:py-14 text-center mt-10 sm:mt-12 lg:mt-16 mb-12 sm:mb-14 scroll-mt-24"
-        >
-          <div className="stitch-starfield-mini pointer-events-none" aria-hidden />
-          <div className="relative stitch-cta-inner landing-hit-target px-1">
-            <h2 className="font-[family-name:var(--font-ui)] text-xl sm:text-2xl md:text-3xl font-bold text-white mb-7 sm:mb-8">
-              The world is signaling. Are you listening?
+        {/* ── Why ATLAS ── */}
+        <section id="cta-join" className="atlas-why landing-hit-target scroll-mt-20">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
+            className="atlas-why__header"
+          >
+            <p className="stitch-eyebrow mb-4">The Problem</p>
+            <h2 className="atlas-section-title">
+              The world doesn't send<br />email digests.
             </h2>
-            <div className="flex justify-center">
-              <button type="button" onClick={enterApp} className="stitch-btn-primary stitch-btn-primary--wide">
-                {hasCompletedOnboarding ? 'Login' : 'Get started now'}
-              </button>
-            </div>
+            <p className="atlas-section-body mt-5 mx-auto text-center text-balance">
+              You're reading disconnected headlines from a dozen tabs. None of them tell you <em>where</em> things are happening, how events relate, or what the broader picture looks like. You're consuming noise — not intelligence.
+            </p>
+          </motion.div>
+
+          <div className="atlas-why__grid">
+            {[
+              {
+                label: 'Before ATLAS',
+                icon: '✕',
+                iconColor: 'rgba(239,68,68,0.75)',
+                points: [
+                  'Scattered feeds with no geographic context',
+                  'No way to see how stories relate globally',
+                  'Algorithmic bias shapes what you see',
+                  'Signal buried under opinion and noise',
+                ],
+              },
+              {
+                label: 'With ATLAS',
+                icon: '◎',
+                iconColor: 'rgba(56,189,248,0.85)',
+                points: [
+                  'Every story pinned to where it happened',
+                  'Patterns emerge across regions and time',
+                  'You choose your sources — unfiltered',
+                  'One glance tells you the state of the world',
+                ],
+              },
+            ].map((col, ci) => (
+              <motion.div
+                key={col.label}
+                className="atlas-why__card"
+                initial={{ opacity: 0, y: 24 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: '-60px' }}
+                transition={{ duration: 0.7, delay: ci * 0.15, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <div className="atlas-why__card-header">
+                  <span className="atlas-why__icon" style={{ color: col.iconColor }}>{col.icon}</span>
+                  <span className="atlas-why__card-label">{col.label}</span>
+                </div>
+                <ul className="atlas-why__list">
+                  {col.points.map((p) => (
+                    <li key={p} className="atlas-why__list-item">{p}</li>
+                  ))}
+                </ul>
+              </motion.div>
+            ))}
           </div>
         </section>
 
-        <footer
-          id="contact"
-          className="stitch-footer landing-hit-target scroll-mt-24 border-t border-white/[0.06]"
-        >
-          <div className="stitch-footer__inner">
-            <button
-              type="button"
-              className="stitch-footer__brand flex items-center border-0 bg-transparent p-0 cursor-pointer text-inherit shrink-0"
-              onClick={scrollLandingTop}
-              aria-label="ATLAS — top of page"
-            >
-              <AtlasWordmark
-                className="atlas-wordmark--landing atlas-wordmark--landing-footer w-auto opacity-90"
-                aria-hidden
-              />
-            </button>
-            <nav className="stitch-footer__links" aria-label="Footer">
-              <button type="button" onClick={() => scrollTo('cta-join')} className="stitch-footer-link">
-                Explore
+        {/* ── Feature Education ── */}
+        <section className="atlas-features landing-hit-target">
+          <motion.div
+            className="atlas-why__header"
+            initial={{ opacity: 0, y: 24 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-80px' }}
+            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <p className="stitch-eyebrow mb-4">What You Get</p>
+            <h2 className="atlas-section-title">Intelligence at the speed<br />of the world.</h2>
+          </motion.div>
+
+          <div className="atlas-features__grid">
+            {[
+              {
+                n: '01',
+                title: 'Living Globe',
+                body: 'Every news event pinned to its exact location on a real-time 3D globe. Spin, zoom, and explore the world as it unfolds.',
+              },
+              {
+                n: '02',
+                title: 'Your Sources',
+                body: 'Choose from hundreds of global publishers across every region. No algorithm decides what you see — you do.',
+              },
+              {
+                n: '03',
+                title: 'Pattern Recognition',
+                body: 'Regional clusters and category filters reveal how stories connect across borders — what a single headline never shows.',
+              },
+              {
+                n: '04',
+                title: 'Open Source',
+                body: 'No data harvesting, no monetized attention, no black-box curation. Transparent by design — the code is yours to inspect.',
+              },
+            ].map((f, fi) => (
+              <motion.div
+                key={f.n}
+                className="atlas-feature-card"
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: '-50px' }}
+                transition={{ duration: 0.65, delay: fi * 0.1, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <span className="atlas-feature-card__num">{f.n}</span>
+                <h3 className="atlas-feature-card__title">{f.title}</h3>
+                <p className="atlas-feature-card__body">{f.body}</p>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Final CTA ── */}
+        <section className="atlas-final-cta landing-hit-target">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: '-60px' }}
+            transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+            className="atlas-final-cta__inner"
+          >
+            <p className="stitch-eyebrow mb-5">Ready?</p>
+            <h2 className="atlas-section-title atlas-section-title--sm">
+              The world is signaling.<br />Are you listening?
+            </h2>
+            <div className="mt-10 flex justify-center">
+              <button type="button" onClick={enterApp} className="stitch-btn-ghost" id="cta-enter">
+                <span className="stitch-btn-ghost__text">{hasCompletedOnboarding ? 'Enter Atlas' : 'Start Now'}</span>
+                <span className="stitch-btn-ghost__arrow" aria-hidden>→</span>
               </button>
-              <button type="button" onClick={() => scrollTo('contact')} className="stitch-footer-link">
-                Contact
+            </div>
+          </motion.div>
+        </section>
+
+        {/* ── Footer ── */}
+        <footer id="contact" className="atlas-footer landing-hit-target scroll-mt-24">
+          <div className="atlas-footer__top">
+
+            {/* Brand col */}
+            <div className="atlas-footer__brand-col">
+              <button
+                type="button"
+                className="border-0 bg-transparent p-0 cursor-pointer text-inherit"
+                onClick={scrollLandingTop}
+                aria-label="ATLAS — top of page"
+              >
+                <AtlasWordmark className="atlas-wordmark--landing atlas-wordmark--landing-footer w-auto opacity-90" aria-hidden />
               </button>
-            </nav>
-            <div className="stitch-footer__social" aria-label="Social">
-              {['in', 'x', 'gh', 'yt'].map((k) => (
-                <span key={k} className="stitch-social-dot" title={k} />
-              ))}
+              <p className="atlas-footer__tagline-sm">
+                Open-source global intelligence.<br />Not operational intelligence.
+              </p>
+            </div>
+
+            {/* Contact col */}
+            <div className="atlas-footer__col">
+              <p className="atlas-footer__col-label">Contact</p>
+              <p className="atlas-footer__col-body">
+                Questions, partnerships, or press — reach out directly.
+              </p>
+              <a
+                href="mailto:hello@atlas-intelligence.io"
+                className="stitch-btn-ghost atlas-footer__inline-btn"
+                id="footer-contact-btn"
+              >
+                <span className="stitch-btn-ghost__text">Send a message</span>
+                <span className="stitch-btn-ghost__arrow" aria-hidden>→</span>
+              </a>
+            </div>
+
+            {/* Feedback col */}
+            <div className="atlas-footer__col">
+              <p className="atlas-footer__col-label">Feedback</p>
+              <p className="atlas-footer__col-body">
+                Found a bug or have a feature idea? We read every one.
+              </p>
+              <div className="atlas-footer__pill-row">
+                <a
+                  href="https://github.com/shreyaslas-global-intelligence/issues/new?template=bug_report.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="atlas-pill-btn"
+                  id="footer-bug-btn"
+                >
+                  🐛 Report a bug
+                </a>
+                <a
+                  href="https://github.com/shreyaslas-global-intelligence/issues/new?template=feature_request.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="atlas-pill-btn atlas-pill-btn--accent"
+                  id="footer-feature-btn"
+                >
+                  ✦ Request a feature
+                </a>
+              </div>
             </div>
           </div>
-          <p className="stitch-footer__tagline font-[family-name:var(--font-data)] text-[10px] sm:text-[11px] tracking-[0.14em] uppercase text-white/28 text-center px-4 pb-6 pt-5 mt-0 border-t border-white/[0.05]">
-            Open-source signals · Not operational intelligence
-          </p>
+
+          <div className="atlas-footer__bottom">
+            <nav className="atlas-footer__nav" aria-label="Footer nav">
+              <button type="button" onClick={() => scrollTo('cta-join')} className="stitch-footer-link">Explore</button>
+              <button type="button" onClick={() => scrollTo('contact')} className="stitch-footer-link">Contact</button>
+            </nav>
+            <p className="atlas-footer__copy">
+              © {new Date().getFullYear()} ATLAS · Open-source signals · Not operational intelligence
+            </p>
+          </div>
         </footer>
       </main>
     </motion.div>
