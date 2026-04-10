@@ -25,8 +25,8 @@ export function initEventBus() {
     if (type === 'SNAPSHOT') {
       for (const fn of subscribers) fn({ snapshot: msg.data.events })
     }
-    if (type === 'TIER_COUNTS') {
-      for (const fn of subscribers) fn({ tierCounts: msg.data.counts })
+    if (type === 'PRIORITY_COUNTS') {
+      for (const fn of subscribers) fn({ priorityCounts: msg.data.counts })
     }
   }
 
@@ -95,8 +95,8 @@ export function requestSnapshot() {
   if (eventBusWorker) eventBusWorker.postMessage({ type: 'GET_SNAPSHOT' })
 }
 
-export function requestTierCounts() {
-  if (eventBusWorker) eventBusWorker.postMessage({ type: 'GET_TIER_COUNTS' })
+export function requestPriorityCounts() {
+  if (eventBusWorker) eventBusWorker.postMessage({ type: 'GET_PRIORITY_COUNTS' })
 }
 
 export function getSourceStatuses() {

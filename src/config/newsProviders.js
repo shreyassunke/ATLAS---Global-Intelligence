@@ -23,7 +23,7 @@ export const NEWS_PROVIDERS = [
     baseUrl: 'https://newsapi.org/v2',
     dailyLimit: 100,
     supportsSources: true,
-    supportsDomains: true,
+    supportsDimensions: true,
   },
   {
     id: 'gnews',

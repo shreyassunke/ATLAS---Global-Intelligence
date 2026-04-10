@@ -2,7 +2,8 @@ import { useRef, useEffect, useMemo, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import { CATEGORIES } from '../../utils/categoryColors'
-import { TIER_COLORS } from '../../core/eventSchema'
+import { DIMENSION_COLORS, DIMENSION_LABELS, DIMENSION_ICONS, PRIORITY_LABELS } from '../../core/eventSchema'
+import { legacyCategoryToDimension } from '../../utils/categoryColors'
 
 function timeAgo(dateStr) {
   if (!dateStr) return ''
@@ -14,8 +15,6 @@ function timeAgo(dateStr) {
   if (hours < 24) return `${hours}h ago`
   return `${Math.floor(hours / 24)}d ago`
 }
-
-const TIER_LABELS = { latent: 'LATENT', active: 'ACTIVE', critical: 'CRITICAL' }
 
 export default function LiveTicker() {
   const newsItems = useAtlasStore((s) => s.newsItems)
@@ -29,7 +28,9 @@ export default function LiveTicker() {
   const feedRef = useRef(null)
 
   const tickerItems = useMemo(() => {
+    // Ticker shows P1 events by default for a quiet globe
     const eventItems = events
+      .filter(e => e.priority === 'p1')
       .sort((a, b) => b.severity - a.severity || new Date(b.timestamp) - new Date(a.timestamp))
       .slice(0, 30)
       .map(e => ({
@@ -38,8 +39,9 @@ export default function LiveTicker() {
         event: e,
         title: e.title,
         source: e.source,
-        color: TIER_COLORS[e.tier],
-        tier: e.tier,
+        color: DIMENSION_COLORS[e.dimension] || '#1a90ff',
+        dimension: e.dimension,
+        priority: e.priority,
         time: e.timestamp,
         severity: e.severity,
       }))
@@ -47,19 +49,23 @@ export default function LiveTicker() {
     const newsTickerItems = newsItems
       .sort((a, b) => b.importance - a.importance)
       .slice(0, 20)
-      .map(n => ({
-        id: `news_${n.id}`,
-        isEvent: false,
-        news: n,
-        title: n.title,
-        source: n.source,
-        color: CATEGORIES[n.category]?.color || '#fff',
-        time: n.publishedAt,
-        severity: 0,
-        mediaType: n.mediaType,
-        isLive: n.isLive,
-        thumbnailUrl: n.thumbnailUrl,
-      }))
+      .map(n => {
+        const dim = legacyCategoryToDimension(n.category)
+        return {
+          id: `news_${n.id}`,
+          isEvent: false,
+          news: n,
+          title: n.title,
+          source: n.source,
+          color: DIMENSION_COLORS[dim] || CATEGORIES[n.category]?.color || '#fff',
+          dimension: dim,
+          time: n.publishedAt,
+          severity: 0,
+          mediaType: n.mediaType,
+          isLive: n.isLive,
+          thumbnailUrl: n.thumbnailUrl,
+        }
+      })
 
     return [...eventItems, ...newsTickerItems]
       .sort((a, b) => b.severity - a.severity || new Date(b.time) - new Date(a.time))
@@ -77,31 +83,36 @@ export default function LiveTicker() {
         title: e.title,
         source: e.source,
         description: e.detail,
-        color: TIER_COLORS[e.tier],
-        tier: e.tier,
+        color: DIMENSION_COLORS[e.dimension] || '#1a90ff',
+        dimension: e.dimension,
+        priority: e.priority,
         time: e.timestamp,
-        category: e.domain,
+        category: e.dimension,
         severity: e.severity,
       }))
 
     const newsFeed = newsItems
       .sort((a, b) => b.importance - a.importance)
       .slice(0, 30)
-      .map(n => ({
-        id: `news_${n.id}`,
-        isEvent: false,
-        news: n,
-        title: n.title,
-        source: n.source,
-        description: n.description,
-        color: CATEGORIES[n.category]?.color || '#fff',
-        time: n.publishedAt,
-        category: n.category,
-        severity: 0,
-        mediaType: n.mediaType,
-        isLive: n.isLive,
-        thumbnailUrl: n.thumbnailUrl,
-      }))
+      .map(n => {
+        const dim = legacyCategoryToDimension(n.category)
+        return {
+          id: `news_${n.id}`,
+          isEvent: false,
+          news: n,
+          title: n.title,
+          source: n.source,
+          description: n.description,
+          color: DIMENSION_COLORS[dim] || CATEGORIES[n.category]?.color || '#fff',
+          dimension: dim,
+          time: n.publishedAt,
+          category: n.category,
+          severity: 0,
+          mediaType: n.mediaType,
+          isLive: n.isLive,
+          thumbnailUrl: n.thumbnailUrl,
+        }
+      })
 
     return [...evtFeed, ...newsFeed]
       .sort((a, b) => b.severity - a.severity || new Date(b.time) - new Date(a.time))
@@ -179,7 +190,7 @@ export default function LiveTicker() {
             <div className="feed-header">
               <div className="feed-header-left">
                 <div className="feed-live-dot" />
-                <span className="feed-header-title">INTEL FEED</span>
+                <span className="feed-header-title">ATLAS Feed</span>
                 <span className="feed-header-count">{feedItems.length} events</span>
               </div>
               <button className="feed-close-btn" onClick={() => setFeedOpen(false)}>✕</button>
@@ -208,12 +219,9 @@ export default function LiveTicker() {
                     <div className="feed-card-body">
                       <div className="feed-card-meta">
                         <span className="feed-card-cat" style={{ color: item.color }}>
-                          {item.isEvent && item.tier && (
-                            <span style={{ opacity: 0.7, marginRight: 4 }}>{TIER_LABELS[item.tier]}</span>
-                          )}
                           {item.isEvent
-                            ? item.event?.domain?.toUpperCase()
-                            : CATEGORIES[item.category]?.icon + ' ' + (CATEGORIES[item.category]?.label || item.category)
+                            ? `${DIMENSION_ICONS[item.dimension] || ''} ${DIMENSION_LABELS[item.dimension] || item.dimension}`
+                            : `${CATEGORIES[item.category]?.icon || ''} ${CATEGORIES[item.category]?.label || item.category}`
                           }
                         </span>
                         {item.mediaType === 'video' && !item.thumbnailUrl && (
@@ -270,12 +278,8 @@ export default function LiveTicker() {
                 </span>
               ) : (
                 <div
-                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    item.tier === 'critical' ? 'ticker-dot-critical' :
-                    item.tier === 'active' ? 'ticker-dot-active' :
-                    item.tier === 'latent' ? 'ticker-dot-latent' : ''
-                  }`}
-                  style={!item.tier ? { backgroundColor: item.color } : {}}
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: item.color }}
                 />
               )}
               <span className="text-[10px] text-white/55 font-mono">
@@ -284,11 +288,7 @@ export default function LiveTicker() {
               <span
                 className={`text-[12px] font-medium truncate ${mobileMode ? 'max-w-[180px]' : 'max-w-[280px]'}`}
                 style={{
-                  color: item.tier === 'critical'
-                    ? 'rgba(255, 80, 80, 0.95)'
-                    : item.tier === 'active'
-                    ? 'rgba(255, 200, 60, 0.9)'
-                    : 'rgba(255, 255, 255, 0.92)',
+                  color: 'rgba(255, 255, 255, 0.92)',
                 }}
               >
                 {item.title}

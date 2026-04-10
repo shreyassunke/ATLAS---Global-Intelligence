@@ -24,13 +24,13 @@ export function parseUSGSGeoJSON(data) {
       if (isNaN(lat) || isNaN(lng) || isNaN(mag)) return null
 
       // Classify severity by magnitude
-      let tier = 'latent'
+      let priority = 'p3'
       let severity = 1
-      if (mag >= 7.0) { tier = 'critical'; severity = 5 }
-      else if (mag >= 6.0) { tier = 'critical'; severity = 4 }
-      else if (mag >= 5.5) { tier = 'active'; severity = 3 }
-      else if (mag >= 5.0) { tier = 'active'; severity = 2 }
-      else if (mag >= 4.0) { tier = 'latent'; severity = 1 }
+      if (mag >= 7.0) { priority = 'p1'; severity = 5 }
+      else if (mag >= 6.0) { priority = 'p1'; severity = 4 }
+      else if (mag >= 5.5) { priority = 'p2'; severity = 3 }
+      else if (mag >= 5.0) { priority = 'p2'; severity = 2 }
+      else if (mag >= 4.0) { priority = 'p3'; severity = 1 }
       else return null // Skip below M4.0 for globe visibility
 
       // Depth classification
@@ -43,9 +43,9 @@ export function parseUSGSGeoJSON(data) {
         magnitude: mag,
         depth: depthKm,
         depthLabel,
-        tier,
+        priority,
         severity,
-        domain: 'natural',
+        dimension: 'environment',
         title: p.title || `M${mag.toFixed(1)} Earthquake`,
         detail: `Magnitude ${mag.toFixed(1)} at ${depthKm.toFixed(0)}km depth (${depthLabel}). ${p.place || ''}`.trim(),
         source: 'USGS',

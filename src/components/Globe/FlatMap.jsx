@@ -104,7 +104,7 @@ export default function FlatMap({ onGlobeReady }) {
                 <TileLayer
                     url={TILE_URL}
                     attribution={TILE_ATTR}
-                    subdomains="abcd"
+                    subdimensions="abcd"
                     maxZoom={MAX_ZOOM}
                 />
                 <ZoomSync />

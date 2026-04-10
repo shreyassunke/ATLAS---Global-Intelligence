@@ -18,10 +18,10 @@
   --text: #e2e8f0;
   --text-muted: #94a3b8;
 
-  /* Urgency tier palette */
-  --tier-latent: #1a90ff;
-  --tier-active: #ffaa00;
-  --tier-critical: #ff2222;
+  /* Urgency priority palette */
+  --priority-p3: #1a90ff;
+  --priority-p2: #ffaa00;
+  --priority-p1: #ff2222;
 
   /* Typography */
   --font-data: 'JetBrains Mono', monospace;
@@ -43,6 +43,14 @@
   /* Spacing */
   --hud-padding: 16px;
   --panel-gap: 12px;
+
+  /* Dimension colors — encodes what kind of event */
+  --dim-safety: #E24B4A;
+  --dim-governance: #7F77DD;
+  --dim-economy: #EF9F27;
+  --dim-people: #1D9E75;
+  --dim-environment: #888780;
+  --dim-narrative: #378ADD;
 }
 
 * {
@@ -202,10 +210,6 @@ body,
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   animation: glass-glow 10s ease-in-out infinite;
-}
-
-.clock-panel {
-  animation: glass-glow 14s ease-in-out infinite;
 }
 
 @keyframes orbit-spin {
@@ -1303,7 +1307,7 @@ button.atlas-logo-header-btn:focus-visible {
 
 /* ── ATLAS v4 — Unified Header Bar ── */
 
-/* Three columns: equal flex sides pin the tier pills to true viewport center */
+/* Three columns: brand left, mission clock center, actions right */
 .hud-header {
   position: fixed;
   top: 0;
@@ -1326,6 +1330,7 @@ button.atlas-logo-header-btn:focus-visible {
     0 12px 40px rgba(0, 0, 0, 0.15),
     inset 0 -1px 0 rgba(255, 255, 255, 0.04);
   pointer-events: auto;
+  overflow: visible;
 }
 
 .hud-header-left-zone {
@@ -1344,16 +1349,285 @@ button.atlas-logo-header-btn:focus-visible {
   flex-shrink: 0;
 }
 
+.hud-header-center-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: min(52vw, 420px);
+  pointer-events: auto;
+}
+
 .hud-header-right-zone {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
   min-width: 0;
 }
 
-/* Icons stay on the far right */
 .hud-header-right-zone .hud-header-right {
-  margin-left: auto;
+  margin-left: 0;
+}
+
+/* Mission clock — matches header HUD typography, no starfield plate */
+.hud-mission-clock {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  font-family: var(--font-hud);
+}
+
+.hud-mission-clock__trigger {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 10px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.hud-mission-clock__trigger:hover,
+.hud-mission-clock__trigger:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+
+.hud-mission-clock__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  line-height: 1.2;
+}
+
+.hud-mission-clock__tz {
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
+}
+
+.hud-mission-clock__time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.hud-mission-clock__coords {
+  font-size: 7px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.32);
+  white-space: nowrap;
+}
+
+/* Flex centering avoids transform conflicts with Framer Motion on the same node */
+.hud-mission-clock__panel-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  display: flex;
+  justify-content: center;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.hud-mission-clock__panel-wrap > * {
+  pointer-events: auto;
+  width: min(300px, calc(100vw - 24px));
+  max-width: 100%;
+}
+
+.hud-mission-clock--mobile .hud-mission-clock__trigger {
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.hud-mission-clock--mobile .hud-mission-clock__row {
+  gap: 0.2rem 0.35rem;
+}
+
+.hud-mission-clock--mobile .hud-mission-clock__tz {
+  font-size: 6px;
+  letter-spacing: 0.1em;
+  max-width: 22vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-mission-clock--mobile .hud-mission-clock__time {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+.hud-mission-clock--mobile .hud-mission-clock__coords {
+  font-size: 6px;
+  letter-spacing: 0.08em;
+  max-width: 38vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Fixed below bar; flex keeps dropdown centered on viewport */
+.hud-mission-clock__panel-wrap--mobile {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 42px;
+  display: flex;
+  justify-content: center;
+  padding: 0 8px;
+  pointer-events: none;
+}
+
+.hud-mission-clock__panel-wrap--mobile > * {
+  width: min(300px, calc(100vw - 16px));
+}
+
+/* Opaque timezone menu (replaces glass panel for readability) */
+.hud-mission-clock__dropdown {
+  font-family: var(--font-hud);
+  background: rgba(10, 14, 24, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.75),
+    0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.hud-mission-clock__dropdown-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hud-mission-clock__format-toggle {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hud-mission-clock__format-toggle button {
+  font-family: var(--font-hud);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  padding: 5px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.hud-mission-clock__format-toggle button:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.hud-mission-clock__format-toggle button[data-active='true'] {
+  background: rgba(0, 207, 255, 0.18);
+  color: var(--accent, #00cfff);
+}
+
+.hud-mission-clock__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.hud-mission-clock__close:hover,
+.hud-mission-clock__close:focus-visible {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.hud-mission-clock__search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 8px 10px;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.92);
+  font-family: var(--font-hud);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.hud-mission-clock__search::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.hud-mission-clock__search:focus {
+  outline: none;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.hud-mission-clock__list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: min(280px, 42vh);
+  overflow-y: auto;
+}
+
+.hud-mission-clock__list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-family: var(--font-hud);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.hud-mission-clock__list button:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.hud-mission-clock__list button[data-active='true'] {
+  background: rgba(0, 207, 255, 0.12);
+  color: rgba(255, 255, 255, 0.98);
+  box-shadow: inset 2px 0 0 0 var(--accent, #00cfff);
 }
 
 /* Ambient track picker (portal to body) */
@@ -1634,54 +1908,11 @@ button.atlas-logo-header-btn:focus-visible {
   min-width: 0;
 }
 
-.hud-header-center {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  position: relative;
-  flex-shrink: 0;
-  justify-self: center;
-  z-index: 1;
-}
-
 .hud-header-right {
   display: flex;
   align-items: center;
   gap: 3px;
   flex-shrink: 0;
-}
-
-.hud-api-pill {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  font-family: var(--font-data);
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 0.05em;
-  cursor: default;
-}
-
-.hud-api-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.hud-api-dot.connected {
-  background: #22c55e;
-  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
-}
-
-.hud-api-dot.error {
-  background: #ef4444;
-  box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
 }
 
 .hud-loading-pulse {
@@ -1692,56 +1923,6 @@ button.atlas-logo-header-btn:focus-visible {
   color: var(--accent);
   opacity: 0.6;
   animation: pulse 1.5s ease-in-out infinite;
-}
-
-/* Tier count display */
-.hud-tier-counts {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.hud-tier {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
-  font-family: var(--font-data);
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.7);
-  cursor: help;
-}
-
-.hud-tier-shape {
-  font-size: 9px;
-  line-height: 1;
-}
-
-.hud-tier.latent {
-  border-color: rgba(26, 144, 255, 0.25);
-}
-
-.hud-tier.latent .hud-tier-shape {
-  color: var(--tier-latent);
-}
-
-.hud-tier.active {
-  border-color: rgba(255, 170, 0, 0.25);
-}
-
-.hud-tier.active .hud-tier-shape {
-  color: var(--tier-active);
-}
-
-.hud-tier.critical {
-  border-color: rgba(255, 34, 34, 0.25);
-}
-
-.hud-tier.critical .hud-tier-shape {
-  color: var(--tier-critical);
 }
 
 /* Icon buttons */
@@ -1781,7 +1962,7 @@ button.atlas-logo-header-btn:focus-visible {
 }
 
 /* Dropdown menu */
-/* z-index must stay below .hud-header (40) so overflow menus paint above Mission Time clock (z-[35]) */
+/* Desktop mission clock is in the header; mobile clock uses z-[35] below the bar (z-40). */
 .hud-user-dropdown {
   width: min(260px, calc(100vw - 24px));
   max-width: min(260px, calc(100vw - 24px));
@@ -1881,24 +2062,24 @@ button.atlas-logo-header-btn:focus-visible {
 
 /* ── ATLAS v4 — Event System ── */
 
-.tier-shape {
+.priority-shape {
   width: 8px;
   height: 8px;
   flex-shrink: 0;
 }
 
-.tier-shape-circle {
+.priority-shape-circle {
   border-radius: 50%;
-  background: var(--tier-latent);
+  background: var(--priority-p3);
 }
 
-.tier-shape-diamond {
-  background: var(--tier-active);
+.priority-shape-diamond {
+  background: var(--priority-p2);
   transform: rotate(45deg) scale(0.75);
 }
 
-.tier-shape-burst {
-  background: var(--tier-critical);
+.priority-shape-burst {
+  background: var(--priority-p1);
   clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 }
 
@@ -1927,7 +2108,7 @@ button.atlas-logo-header-btn:focus-visible {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.event-tier-badge {
+.event-priority-badge {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1940,21 +2121,21 @@ button.atlas-logo-header-btn:focus-visible {
   font-weight: 700;
 }
 
-.event-tier-latent {
+.event-priority-p3 {
   background: rgba(26, 144, 255, 0.12);
-  color: var(--tier-latent);
+  color: var(--priority-p3);
   border: 1px solid rgba(26, 144, 255, 0.2);
 }
 
-.event-tier-active {
+.event-priority-p2 {
   background: rgba(255, 170, 0, 0.12);
-  color: var(--tier-active);
+  color: var(--priority-p2);
   border: 1px solid rgba(255, 170, 0, 0.2);
 }
 
-.event-tier-critical {
+.event-priority-p1 {
   background: rgba(255, 34, 34, 0.15);
-  color: var(--tier-critical);
+  color: var(--priority-p1);
   border: 1px solid rgba(255, 34, 34, 0.25);
 }
 
@@ -2041,17 +2222,217 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 1;
 }
 
-/* Ticker tier-color dot variants */
+/* ── Dimension badge (civilian taxonomy) ── */
+.event-dimension-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-family: var(--font-hud);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--dim-color, #378ADD) 12%, transparent);
+  color: var(--dim-color, #378ADD);
+  border: 1px solid color-mix(in srgb, var(--dim-color, #378ADD) 25%, transparent);
+}
+
+.event-dimension-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Priority indicator — subtle label next to dimension badge */
+.event-priority-indicator {
+  font-family: var(--font-hud);
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.event-priority-indicator.event-priority-p1 {
+  color: var(--priority-p1);
+  opacity: 0.8;
+}
+
+.event-priority-indicator.event-priority-p2 {
+  color: var(--priority-p2);
+  opacity: 0.7;
+}
+
+.event-priority-indicator.event-priority-p3 {
+  color: var(--priority-p3);
+  opacity: 0.5;
+}
+
+/* Source attribution line */
+.event-panel-attribution {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+}
+
+/* Tone indicator */
+.tone-indicator {
+  font-family: var(--font-data);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.tone-negative {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.tone-neutral {
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tone-positive {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.08);
+}
+
+/* ── Causal Thread ("Related Signals") ── */
+.causal-thread {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 10px;
+}
+
+.causal-thread-header {
+  font-family: var(--font-hud);
+  font-size: 8px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 8px;
+}
+
+.causal-thread-empty {
+  font-family: var(--font-data);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.2);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.causal-thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.causal-thread-item {
+  display: flex;
+  gap: 10px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+  width: 100%;
+}
+
+.causal-thread-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.causal-thread-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 10px;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+
+.causal-thread-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.causal-thread-line {
+  width: 1px;
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  margin-top: 3px;
+  min-height: 12px;
+}
+
+.causal-thread-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding-bottom: 4px;
+}
+
+.causal-thread-dim {
+  font-family: var(--font-hud);
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.causal-thread-title {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.causal-thread-meta {
+  font-family: var(--font-data);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Recency animations ── */
+@keyframes atlas-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes atlas-glow {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.3); }
+}
+
+.recency-pulsing {
+  animation: atlas-pulse 1.5s ease-in-out infinite;
+}
+
+.recency-glowing {
+  animation: atlas-glow 3s ease-in-out infinite;
+}
+
+/* Ticker priority-color dot variants — kept for backward compat */
 .ticker-dot-latent {
-  background-color: var(--tier-latent);
+  background-color: var(--priority-p3);
 }
 
 .ticker-dot-active {
-  background-color: var(--tier-active);
+  background-color: var(--priority-p2);
 }
 
 .ticker-dot-critical {
-  background-color: var(--tier-critical);
+  background-color: var(--priority-p1);
 }
 
 /* API health indicator */
@@ -2076,12 +2457,12 @@ button.atlas-logo-header-btn:focus-visible {
 }
 
 .api-health-dot.error {
-  background: var(--tier-critical);
+  background: var(--priority-p1);
   box-shadow: 0 0 4px rgba(255, 34, 34, 0.5);
 }
 
 .api-health-dot.stale {
-  background: var(--tier-active);
+  background: var(--priority-p2);
 }
 
 /* Source status panel */
@@ -2106,7 +2487,7 @@ button.atlas-logo-header-btn:focus-visible {
   padding: 1px 4px;
   border-radius: 2px;
   background: rgba(26, 144, 255, 0.12);
-  color: var(--tier-latent);
+  color: var(--priority-p3);
   letter-spacing: 0.15em;
 }
 
@@ -2127,7 +2508,7 @@ button.atlas-logo-header-btn:focus-visible {
 }
 
 /* Colorblind texture patterns */
-[data-colorblind="true"] .tier-shape-circle {
+[data-colorblind="true"] .priority-shape-circle {
   background-image: repeating-linear-gradient(0deg,
       transparent,
       transparent 2px,
@@ -2135,7 +2516,7 @@ button.atlas-logo-header-btn:focus-visible {
       rgba(255, 255, 255, 0.3) 3px);
 }
 
-[data-colorblind="true"] .tier-shape-diamond {
+[data-colorblind="true"] .priority-shape-diamond {
   background-image: repeating-linear-gradient(45deg,
       transparent,
       transparent 2px,
@@ -2143,22 +2524,22 @@ button.atlas-logo-header-btn:focus-visible {
       rgba(255, 255, 255, 0.3) 3px);
 }
 
-[data-colorblind="true"] .tier-shape-burst {
+[data-colorblind="true"] .priority-shape-burst {
   background-image: none;
 }
 
 [data-colorblind="true"] .ticker-dot-latent {
-  border: 1px solid var(--tier-latent);
-  background: repeating-linear-gradient(0deg, transparent, transparent 1px, var(--tier-latent) 1px, var(--tier-latent) 2px) !important;
+  border: 1px solid var(--priority-p3);
+  background: repeating-linear-gradient(0deg, transparent, transparent 1px, var(--priority-p3) 1px, var(--priority-p3) 2px) !important;
 }
 
 [data-colorblind="true"] .ticker-dot-active {
-  border: 1px solid var(--tier-active);
-  background: repeating-linear-gradient(45deg, transparent, transparent 1px, var(--tier-active) 1px, var(--tier-active) 2px) !important;
+  border: 1px solid var(--priority-p2);
+  background: repeating-linear-gradient(45deg, transparent, transparent 1px, var(--priority-p2) 1px, var(--priority-p2) 2px) !important;
 }
 
 [data-colorblind="true"] .ticker-dot-critical {
-  background: var(--tier-critical) !important;
+  background: var(--priority-p1) !important;
 }
 
 /* Keyboard focus indicators */
@@ -2184,16 +2565,33 @@ button.atlas-logo-header-btn:focus-visible {
 
   .hud-header {
     height: 38px;
-    padding: 0 8px;
-    display: flex;
-    justify-content: space-between;
+    padding: 0 6px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    gap: 8px;
-    grid-template-columns: unset;
+    column-gap: 4px;
   }
 
-  .hud-header-center {
-    display: none;
+  .hud-header-left-zone {
+    grid-column: 1;
+    justify-self: start;
+    min-width: 0;
+  }
+
+  .hud-header-center-zone {
+    grid-column: 2;
+    justify-self: center;
+    max-width: min(44vw, 200px);
+  }
+
+  .hud-header-right-zone {
+    grid-column: 3;
+    justify-self: end;
+    min-width: 0;
+  }
+
+  .hud-mission-clock__panel-wrap--mobile {
+    top: 40px;
   }
 
   .hud-icon-btn {
@@ -2201,10 +2599,6 @@ button.atlas-logo-header-btn:focus-visible {
     height: 38px;
     min-width: 38px;
     min-height: 38px;
-  }
-
-  .hud-api-pill {
-    display: none;
   }
 
   .hud-filters-sidebar {

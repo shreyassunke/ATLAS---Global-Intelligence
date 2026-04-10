@@ -10,7 +10,7 @@ export const LANDING_GLOBE_MARKERS = [
     lng: -0.1278,
     category: 'science_technology',
     title: 'Real-time tracking',
-    body: 'Monitor global intel and news signals as they surface on the globe with low-latency updates.',
+    body: 'Monitor global events and news as they surface on the globe with low-latency updates.',
   },
   {
     id: 'feat-encrypted',
@@ -61,6 +61,6 @@ export const LANDING_GLOBE_MARKERS = [
     title: 'Security Teams',
     body:
       'Surface open-source chatter and news spikes before they hit internal queues. Geography-first visualization helps triage what matters for your perimeter.',
-    stat: 'Sub-minute refresh on enabled intel feeds',
+    stat: 'Sub-minute refresh on enabled data feeds',
   },
 ]

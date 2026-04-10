@@ -5,8 +5,8 @@ const DEDUP_TIME_MS = 3600_000
 const DEDUP_TITLE_THRESHOLD = 0.7
 const SEV5_IMMUNITY_MS = 86400_000
 
-const TIER_SHAPES = { latent: 'circle', active: 'diamond', critical: 'burst' }
-const TIER_COLORS = { latent: '#1a90ff', active: '#ffaa00', critical: '#ff2222' }
+const SHAPES = { latent: 'circle', active: 'diamond', critical: 'burst' }
+const DIMENSION_COLORS = { latent: '#1a90ff', active: '#ffaa00', critical: '#ff2222' }
 const CORROBORATION_OPACITY = { 1: 0.35, 2: 0.55, 3: 0.75, 4: 0.88, 5: 1.0 }
 
 let events = []
@@ -71,18 +71,19 @@ function mergeEvents(existing, incoming) {
     existing.disputed = true
     existing.severity = Math.min(existing.severity, incoming.severity)
   } else if (incoming.severity > existing.severity) {
-    const oldTier = existing.tier
+    const oldPriority = existing.priority || existing.priority
     existing.severity = incoming.severity
-    existing.tier = incoming.tier
-    existing.shape = TIER_SHAPES[incoming.tier]
-    existing.color = TIER_COLORS[incoming.tier]
+    existing.priority = incoming.priority
+    existing.priority = incoming.priority || incoming.priority
+    existing.shape = SHAPES[incoming.priority] || existing.shape
+    existing.color = DIMENSION_COLORS[incoming.priority] || existing.color
 
-    if (oldTier !== incoming.tier) {
+    if (oldPriority !== existing.priority) {
       batchQueue.anomalies.push({
-        type: 'TIER_UPGRADE',
+        type: 'PRIORITY_UPGRADE',
         eventId: existing.id,
-        from: oldTier,
-        to: incoming.tier,
+        from: oldPriority,
+        to: existing.priority,
         timestamp: new Date().toISOString(),
       })
     }
@@ -152,8 +153,8 @@ function getGridCell(lat, lng) {
 
 function updateBaseline(event) {
   const cell = getGridCell(event.lat, event.lng)
-  const domain = event.domain
-  const key = `${cell}_${domain}`
+  const dimension = event.dimension || event.dimension
+  const key = `${cell}_${dimension}`
   const now = Date.now()
 
   if (!baselineCounts[key]) baselineCounts[key] = { total: 0, windowStart: now }
@@ -192,11 +193,11 @@ function runAnomalyRules(newEvents) {
     const dailyAvg = baseline.total / Math.max(baselineAge, 1)
     const sixHourExpected = dailyAvg * 0.25
     if (recent.count > sixHourExpected * 2 && recent.count >= 5) {
-      const [cell, domain] = key.split('_')
+      const [cell, dimension] = key.split('_')
       anomalies.push({
         type: 'SPIKE',
         cell,
-        domain,
+        dimension,
         count: recent.count,
         expected: Math.round(sixHourExpected),
         severity: 4,
@@ -261,9 +262,9 @@ function runAnomalyRules(newEvents) {
 
   for (const cp of CHOKEPOINTS) {
     const nearbyConflict = events.find(e =>
-      e.domain === 'conflict' && haversineKm(e.lat, e.lng, cp.lat, cp.lng) < 500)
+      (e.dimension === 'safety' || e.dimension === 'conflict') && haversineKm(e.lat, e.lng, cp.lat, cp.lng) < 500)
     const oilSpike = events.find(e =>
-      e.domain === 'economic' && e.tags?.some(t => t === 'oil' || t === 'crude' || t === 'energy'))
+      (e.dimension === 'economy' || e.dimension === 'economic') && e.tags?.some(t => t === 'oil' || t === 'crude' || t === 'energy'))
 
     if (nearbyConflict && oilSpike) {
       anomalies.push({
@@ -278,32 +279,35 @@ function runAnomalyRules(newEvents) {
   }
 
   // Rule 6: COMPOUND CRISIS — conflict + humanitarian + economic in same region/24h
-  const domainsByRegion = {}
+  const dimensionsByRegion = {}
   for (const evt of events) {
     const age = now - new Date(evt.timestamp).getTime()
     if (age > 86400_000) continue
     const region = getCountryFromCoords(evt.lat, evt.lng)
-    if (!domainsByRegion[region]) domainsByRegion[region] = new Set()
-    domainsByRegion[region].add(evt.domain)
+    if (!dimensionsByRegion[region]) dimensionsByRegion[region] = new Set()
+    dimensionsByRegion[region].add(evt.dimension || evt.dimension)
   }
 
-  for (const [region, domains] of Object.entries(domainsByRegion)) {
-    if (domains.has('conflict') && domains.has('humanitarian') && domains.has('economic')) {
+  for (const [region, dimensions] of Object.entries(dimensionsByRegion)) {
+    // Check for safety + people + economy
+    if ((dimensions.has('safety') || dimensions.has('conflict')) && 
+        (dimensions.has('people') || dimensions.has('humanitarian')) && 
+        (dimensions.has('economy') || dimensions.has('economic'))) {
       anomalies.push({
         type: 'COMPOUND_CRISIS',
         region,
-        domains: [...domains],
+        dimensions: [...dimensions],
         severity: 5,
         timestamp: new Date().toISOString(),
       })
     }
   }
 
-  // Rule 7: RAPID ESCALATION — event upgrades 2+ tiers in <10min
+  // Rule 7: RAPID ESCALATION — event upgrades 2+ priorities in <10min
   for (const anomaly of batchQueue.anomalies) {
-    if (anomaly.type === 'TIER_UPGRADE') {
-      const tierOrder = { latent: 0, active: 1, critical: 2 }
-      const jump = tierOrder[anomaly.to] - tierOrder[anomaly.from]
+    if (anomaly.type === 'TIER_UPGRADE' || anomaly.type === 'PRIORITY_UPGRADE') {
+      const priorityOrder = { p3: 0, latent: 0, p2: 1, active: 1, p1: 2, critical: 2 }
+      const jump = priorityOrder[anomaly.to] - priorityOrder[anomaly.from]
       if (jump >= 2) {
         anomalies.push({
           type: 'RAPID_ESCALATION',
@@ -372,10 +376,11 @@ function getSnapshot() {
   return events.map(e => ({ ...e }))
 }
 
-function getTierCounts() {
-  const counts = { latent: 0, active: 0, critical: 0 }
+function getPriorityCounts() {
+  const counts = { p3: 0, p2: 0, p1: 0 }
   for (const e of events) {
-    if (counts[e.tier] !== undefined) counts[e.tier]++
+    const pri = e.priority || e.priority || 'p3'
+    if (counts[pri] !== undefined) counts[pri]++
   }
   return counts
 }
@@ -390,7 +395,8 @@ self.onmessage = function (msg) {
       self.postMessage({ type: 'SNAPSHOT', events: getSnapshot() })
       break
     case 'GET_TIER_COUNTS':
-      self.postMessage({ type: 'TIER_COUNTS', counts: getTierCounts() })
+    case 'GET_PRIORITY_COUNTS':
+      self.postMessage({ type: 'PRIORITY_COUNTS', counts: getPriorityCounts() })
       break
     case 'START':
       startBatchTimer()

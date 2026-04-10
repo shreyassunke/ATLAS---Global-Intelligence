@@ -145,3 +145,18 @@ NEVER:
 - <button><div>Label</div></button> (no block elements inside buttons)
 - Placeholder text as the only label for an input field
 - Skipping focus/hover states on interactive elements
+
+# ============================================================
+# DATA LOADING — GLOBE MARKER INVARIANTS (NEVER BREAK)
+# ============================================================
+
+- Globe components MUST handle the case where events arrive before the viewer/globe 
+  is initialized. Use a deferred retry (setTimeout) when viewerRef is null.
+- Globe components MUST re-request event data AFTER async initialization completes 
+  (textures, tiles, terrain). Use requestSnapshot() or re-read store state.
+- NEVER silently drop events. If the globe isn't ready, queue or retry.
+- The event data lifecycle is: fetchManager.worker → eventBus.worker → atlasStore → 
+  globe useEffect. Each stage is async. The globe useEffect MUST be resilient to 
+  arriving before init completes.
+- EventBus init (initEventBusSystem) runs when onGlobeView becomes true, which is 
+  BEFORE the globe 3D context finishes loading. Globe components must handle this gap.

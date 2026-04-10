@@ -1,7 +1,7 @@
 /**
- * Quality tier definitions for Atlas globe rendering.
+ * Quality priority definitions for Atlas globe rendering.
  *
- * Each tier maps to a set of Cesium viewer/scene settings.
+ * Each priority maps to a set of Cesium viewer/scene settings.
  * Auto-detection samples FPS during early frames and assigns
  * HIGH / MEDIUM / LOW automatically. User can override in Settings.
  */
@@ -16,7 +16,7 @@ const QUALITY_STORAGE_KEY = 'atlas_quality_settings'
 const GLOBE_MODE_STORAGE_KEY = 'atlas_globe_mode'
 
 /**
- * Per-tier config — controls every tunable Cesium knob.
+ * Per-priority config — controls every tunable Cesium knob.
  */
 export const QUALITY_TIERS = {
     high: {
@@ -25,13 +25,10 @@ export const QUALITY_TIERS = {
         msaa: 2,
         bloom: true,
         vignette: true,
-        terrain: true,        // full terrain with normals + water mask
-        nightLights: true,
-        tiles3d: true,         // Photorealistic 3D Tiles
-        labels: true,
+        tiles3d: true,         // Google Photorealistic 3D Tiles
         fog: true,
         atmosphere: 'fragment', // perFragmentAtmosphere
-        maxScreenSpaceError: 1.5,
+        maxScreenSpaceError: 8,  // Controls Google 3D Tile LOD quality
         maxMarkers: 300,
         autoRotate: false, // opt-in via Settings — idle spin only when enabled
         targetFrameRate: undefined, // uncapped
@@ -42,13 +39,10 @@ export const QUALITY_TIERS = {
         msaa: 1,
         bloom: false,
         vignette: true,
-        terrain: false,        // flat ellipsoid
-        nightLights: true,
-        tiles3d: false,
-        labels: true,
+        tiles3d: true,        // Always load Google tiles (they are the surface)
         fog: true,
         atmosphere: 'vertex',
-        maxScreenSpaceError: 4.0,
+        maxScreenSpaceError: 12, // Lower LOD for mid-range devices
         maxMarkers: 150,
         autoRotate: false,
         targetFrameRate: 30,
@@ -59,13 +53,10 @@ export const QUALITY_TIERS = {
         msaa: 0,
         bloom: false,
         vignette: false,
-        terrain: false,
-        nightLights: false,
-        tiles3d: false,
-        labels: false,
+        tiles3d: true,        // Always load Google tiles (they are the surface)
         fog: false,
         atmosphere: 'off',
-        maxScreenSpaceError: 8.0,
+        maxScreenSpaceError: 16, // Coarser LOD for low-end devices
         maxMarkers: 80,
         autoRotate: false,
         targetFrameRate: 30,
@@ -84,7 +75,7 @@ export function isMobileDevice() {
 
 /**
  * Sample FPS over N frames using requestAnimationFrame.
- * Returns a promise that resolves with the detected tier name.
+ * Returns a promise that resolves with the detected priority name.
  *
  * @param {HTMLCanvasElement} [canvas] — optional canvas to check WebGL renderer
  * @returns {Promise<'high'|'medium'|'low'>}

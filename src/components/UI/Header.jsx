@@ -5,19 +5,11 @@ import SourceSearch from '../Onboarding/SourceSearch'
 import HeaderUserMenu from './HeaderUserMenu'
 import BgmTrackMenu from './BgmTrackMenu'
 import { AtlasWordmark } from './AtlasWordmark'
+import { MissionClock } from './ClockOverlay'
 
 const IconFilter = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
-  </svg>
-)
-
-const IconRadar = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10" />
-    <circle cx="12" cy="12" r="6" />
-    <circle cx="12" cy="12" r="2" />
-    <line x1="12" y1="2" x2="12" y2="6" />
   </svg>
 )
 
@@ -85,57 +77,21 @@ const IconAmbient = () => (
   </svg>
 )
 
-const IconNews = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/>
-    <path d="M18 14h-8"/>
-    <path d="M15 18h-5"/>
-    <path d="M10 6h8v4h-8V6Z"/>
-  </svg>
-)
-
-/** Hover tooltips (title) + accessible names with live counts */
-const TIER_HELP = {
-  latent: {
-    title:
-      'Latent — early-stage or background intel: lower-urgency signals to track before they escalate.',
-    aria: (n) =>
-      `Latent tier: ${n} items. Early-stage or background intel, lower urgency.`,
-  },
-  active: {
-    title: 'Active — ongoing developments that currently need monitoring or follow-up.',
-    aria: (n) => `Active tier: ${n} items. Ongoing developments to monitor.`,
-  },
-  critical: {
-    title:
-      'Critical — highest-priority, time-sensitive intel that may require immediate attention.',
-    aria: (n) =>
-      `Critical tier: ${n} items. Highest-priority intel; may require immediate action.`,
-  },
-}
-
-export default function Header({ hudHidden = false, onToggleHud, onToggleSources, onToggleFilters, filtersOpen }) {
+export default function Header({ hudHidden = false, onToggleHud, onToggleFilters, filtersOpen }) {
   const isLoading = useAtlasStore((s) => s.isLoading)
   const toggleSettings = useAtlasStore((s) => s.toggleSettings)
   const settingsOpen = useAtlasStore((s) => s.settingsOpen)
-  const newsSidebarOpen = useAtlasStore((s) => s.newsSidebarOpen)
-  const setNewsSidebarOpen = useAtlasStore((s) => s.setNewsSidebarOpen)
-  const sourceStatuses = useAtlasStore((s) => s.sourceStatuses)
   const resetView = useAtlasStore((s) => s.resetView)
   const reopenOnboarding = useAtlasStore((s) => s.reopenOnboarding)
   const reopenLanding = useAtlasStore((s) => s.reopenLanding)
   const triggerManualRefresh = useAtlasStore((s) => s.triggerManualRefresh)
   const manualRefreshUsedToday = useAtlasStore((s) => s.manualRefreshUsedToday)
   const selectedSources = useAtlasStore((s) => s.selectedSources)
-  const tierCounts = useAtlasStore((s) => s.tierCounts)
   const openBgmTrackMenu = useAtlasStore((s) => s.openBgmTrackMenu)
   const [moreOpen, setMoreOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const moreRef = useRef(null)
   const searchRef = useRef(null)
-
-  const connectedCount = Object.values(sourceStatuses).filter(s => s.status === 'connected').length
-  const totalSources = Math.max(Object.keys(sourceStatuses).length, 1)
 
   useEffect(() => {
     if (!moreOpen && !searchOpen) return
@@ -164,7 +120,7 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
         transition={{ delay: 1.5, duration: 0.6 }}
         className="hud-header"
       >
-        {/* Left: logo + status (grid col 1 — balances col 3 for true center pills) */}
+        {/* Left: logo + status */}
         <div className="hud-header-left-zone">
           <div className="hud-header-left">
             <button
@@ -177,75 +133,26 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleSources
               <AtlasWordmark height={22} className="atlas-wordmark--header" aria-hidden />
             </button>
 
-            <div className="hud-api-pill" title={`${connectedCount} of ${totalSources} intel sources connected`}>
-              <div className={`hud-api-dot ${connectedCount > 0 ? 'connected' : 'error'}`} />
-              <span>{connectedCount}/{totalSources}</span>
-            </div>
-
             {isLoading && (
               <span className="hud-loading-pulse">Syncing</span>
             )}
           </div>
         </div>
 
-        {/* Tier counts — centered in full header (grid col 2) */}
-        <div className="hud-header-center">
-          <div className="hud-tier-counts">
-            <div
-              className="hud-tier latent"
-              title={TIER_HELP.latent.title}
-              aria-label={TIER_HELP.latent.aria(tierCounts.latent)}
-            >
-              <span className="hud-tier-shape" aria-hidden>●</span>
-              <span aria-hidden>{tierCounts.latent}</span>
-            </div>
-            <div
-              className="hud-tier active"
-              title={TIER_HELP.active.title}
-              aria-label={TIER_HELP.active.aria(tierCounts.active)}
-            >
-              <span className="hud-tier-shape" aria-hidden>◆</span>
-              <span aria-hidden>{tierCounts.active}</span>
-            </div>
-            <div
-              className="hud-tier critical"
-              title={TIER_HELP.critical.title}
-              aria-label={TIER_HELP.critical.aria(tierCounts.critical)}
-            >
-              <span className="hud-tier-shape" aria-hidden>★</span>
-              <span aria-hidden>{tierCounts.critical}</span>
-            </div>
-          </div>
+        <div className="hud-header-center-zone">
+          <MissionClock />
         </div>
 
-        {/* Right: icon actions — grid col 3 */}
+        {/* Right: icon actions */}
         <div className="hud-header-right-zone">
           <div className="hud-header-right">
           <button
             onClick={onToggleFilters}
             className={`hud-icon-btn ${filtersOpen ? 'active' : ''}`}
-            title="Intel domain filters"
+            title="Dimension filters"
           >
             <IconFilter />
           </button>
-
-          <button
-            onClick={() => onToggleSources?.()}
-            className="hud-icon-btn"
-            title="Intel sources panel"
-          >
-            <IconRadar />
-          </button>
-
-          <button
-            onClick={() => setNewsSidebarOpen(v => !v)}
-            className={`hud-icon-btn ${newsSidebarOpen ? 'active' : ''}`}
-            title="News sidebar"
-          >
-            <IconNews />
-          </button>
-
-          <div className="hud-separator" />
 
           <button
             onClick={toggleSettings}

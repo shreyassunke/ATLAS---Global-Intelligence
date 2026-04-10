@@ -3,15 +3,17 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 
 import { useAtlasStore } from '../../store/atlasStore'
+import { requestSnapshot } from '../../core/eventBus'
 import { CATEGORIES, getCategoryColor } from '../../utils/categoryColors'
 import { getRegionKey, getTimezoneViewCenter } from '../../utils/geo'
 import { QUALITY_TIERS, detectQualityTier } from '../../config/qualityTiers'
-import { TIER_COLORS, SEVERITY_SIZES } from '../../core/eventSchema'
+import { DIMENSION_COLORS, SEVERITY_SIZES } from '../../core/eventSchema'
 import { generateSprite, getAnimationState, getSeveritySize } from '../../core/visualGrammar'
 import { MARITIME_CHOKEPOINTS, NUCLEAR_FACILITIES, SUBMARINE_CABLE_PATHS, clusterEvents } from '../../core/globeLayers'
 
-// Cesium ion token from .env — used for World Imagery, World Terrain, Black Marble (3812), Photorealistic 3D Tiles
+// Cesium ion token from .env — used for skybox and other ion assets
 const ION_TOKEN = import.meta.env.VITE_CESIUM_ION_TOKEN || ''
+const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
 const ZOOMED_OUT_HEIGHT = 12_000_000
 const MAX_PER_REGION_ZOOMED_OUT = 2
@@ -149,7 +151,7 @@ function convexHull(points) {
 export default function CesiumGlobe({ onGlobeReady }) {
   const containerRef = useRef(null)
   const viewerRef = useRef(null)
-  /** Mirrors Settings → Features → Auto-Rotate (quality tier + overrides) */
+  /** Mirrors Settings → Features → Auto-Rotate (quality priority + overrides) */
   const effectiveAutoRotateRef = useRef(false)
   /** When true, idle timeout has passed since last interaction — may spin if setting is on */
   const idleSpinGateRef = useRef(false)
@@ -177,24 +179,21 @@ export default function CesiumGlobe({ onGlobeReady }) {
   const newsItems = useAtlasStore((s) => s.newsItems)
   const events = useAtlasStore((s) => s.events)
   const activeCategories = useAtlasStore((s) => s.activeCategories)
-  const activeDomains = useAtlasStore((s) => s.activeDomains)
-  const severityFloor = useAtlasStore((s) => s.severityFloor)
+  const activeDimensions = useAtlasStore((s) => s.activeDimensions)
+  const priorityFilter = useAtlasStore((s) => s.priorityFilter)
   const openStreetView = useAtlasStore((s) => s.openStreetView)
 
-  // Quality tier state
+  // Quality priority state
   const qualityTier = useAtlasStore((s) => s.qualityTier)
   const resolvedTier = useAtlasStore((s) => s.resolvedTier)
   const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
-  const setResolvedTier = useAtlasStore((s) => s.setResolvedTier)
+  const setResolvedPriority = useAtlasStore((s) => s.setResolvedPriority)
 
   // Refs for layers that can be toggled by quality settings
   const layerRefs = useRef({
     bloom: null,
     vignette: null,
-    lightsLayer: null,
-    labelsLayer: null,
-    tiles3d: null,
-    terrainProvider: null,
+    tiles3d: null,  // Google 3D Tiles tileset
   })
 
   // Convert CSS color to Cesium Color (cached)
@@ -290,10 +289,10 @@ export default function CesiumGlobe({ onGlobeReady }) {
     }
   }
 
-  function getSprite(shape, tier, domain) {
-    const key = `${shape}_${tier}_${domain}`
+  function getSprite(priority, dimension) {
+    const key = `${priority}_${dimension}`
     if (spriteCacheRef.current.has(key)) return spriteCacheRef.current.get(key)
-    const canvas = generateSprite(shape, tier, domain, 64)
+    const canvas = generateSprite(priority, dimension, 64)
     spriteCacheRef.current.set(key, canvas)
     return canvas
   }
@@ -312,10 +311,12 @@ export default function CesiumGlobe({ onGlobeReady }) {
 
     for (const evt of eventList) {
       if (evt.lat == null || evt.lng == null) continue
-      if (!activeDomains.has(evt.domain)) continue
-      if (evt.severity < severityFloor) continue
+      if (!activeDimensions.has(evt.dimension)) continue
+      // Priority filter: 'p1' = P1 only, 'p1p2' = P1+P2, 'all' = everything
+      if (priorityFilter === 'p1' && evt.priority !== 'p1') continue
+      if (priorityFilter === 'p1p2' && evt.priority === 'p3') continue
 
-      const sprite = getSprite(evt.shape, evt.tier, evt.domain)
+      const sprite = getSprite(evt.priority, evt.dimension)
       const size = getSeveritySize(evt.severity)
 
       const billboard = billboards.add({
@@ -346,12 +347,12 @@ export default function CesiumGlobe({ onGlobeReady }) {
         Cesium.Ion.defaultAccessToken = ION_TOKEN
       }
 
-      // ── Get effective quality setting (overrides > tier default) ──
+      // ── Get effective quality setting (overrides > priority default) ──
       const eff = (key) => {
         const st = useAtlasStore.getState()
         if (key in st.qualityOverrides) return st.qualityOverrides[key]
-        const tier = QUALITY_TIERS[st.resolvedTier] || QUALITY_TIERS.high
-        return typeof tier[key] === 'function' ? tier[key]() : tier[key]
+        const priority = QUALITY_TIERS[st.resolvedTier] || QUALITY_TIERS.high
+        return typeof priority[key] === 'function' ? priority[key]() : priority[key]
       }
 
       const viewer = new Cesium.Viewer(container, {
@@ -392,74 +393,33 @@ export default function CesiumGlobe({ onGlobeReady }) {
       viewer.clock.currentTime = Cesium.JulianDate.now()
       viewer.clock.shouldAnimate = true
 
-      // --- Base imagery: Cesium ion for photorealistic globe, or fallback ---
-      if (ION_TOKEN) {
-        try {
-          viewer.imageryLayers.removeAll()
-          const worldImagery = await Cesium.createWorldImageryAsync({
-            style: Cesium.IonWorldImageryStyle.AERIAL,
-          })
-          if (!destroyed) viewer.imageryLayers.addImageryProvider(worldImagery)
-        } catch {
-          if (!destroyed) viewer.imageryLayers.addImageryProvider(await Cesium.createWorldImageryAsync())
-        }
-      } else {
-        try {
-          viewer.imageryLayers.removeAll()
-          const provider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
-          )
-          if (!destroyed) viewer.imageryLayers.addImageryProvider(provider)
-        } catch {
-          viewer.imageryLayers.addImageryProvider(
-            new Cesium.TileMapServiceImageryProvider({
-              url: Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'),
-            }),
-          )
-        }
-      }
+      // --- Remove all default imagery — Google 3D Tiles ARE the surface ---
+      viewer.imageryLayers.removeAll()
 
-      // --- Terrain (quality-dependent) ---
-      if (ION_TOKEN && eff('terrain')) {
-        try {
-          const terrain = await Cesium.createWorldTerrainAsync({
-            requestWaterMask: true,
-            requestVertexNormals: true,
-          })
-          if (!destroyed) {
-            viewer.terrainProvider = terrain
-            layerRefs.current.terrainProvider = terrain
-          }
-        } catch {
-          /* ellipsoid fallback */
-        }
-      }
+      // --- No terrain — Google 3D Tiles provide their own mesh surface ---
 
       if (destroyed) return
 
       // ---------------------------------------------------------------
-      //  Globe rendering
+      //  Globe rendering — DISABLED: Google 3D Tiles are the surface
       // ---------------------------------------------------------------
       const { scene } = viewer
       const globe = scene.globe
 
+      // Hide the default globe — Google tiles replace it entirely.
+      // Keeping globe.show = true causes z-fighting and double-surface artifacts.
+      globe.show = false
       globe.enableLighting = true
-      globe.showGroundAtmosphere = true
-      // Ensure globe occlusion works for markers/labels.
-      globe.depthTestAgainstTerrain = true
-      globe.backFaceCulling = true
 
-      // Softer limb: lower intensity and scale heights for gradual fade into space (globe.gl-style)
-      globe.atmosphereLightIntensity = 12.0
-      globe.atmosphereRayleighScaleHeight = 12000
-      globe.atmosphereMieScaleHeight = 5000
+      // Black space background (visible where no tiles are loaded yet)
+      scene.backgroundColor = Cesium.Color.BLACK
 
       // ---------------------------------------------------------------
-      //  Sun — drives day/night; position follows viewer.clock (shouldAnimate: true)
+      //  Sun — drives realistic shading on Google 3D tile surfaces
       // ---------------------------------------------------------------
       scene.light = new Cesium.SunLight({
         color: Cesium.Color.fromCssColorString('#fffaf5'),
-        intensity: 1.7,
+        intensity: 2.0,
       })
       if (scene.sun) {
         scene.sun.show = true
@@ -473,9 +433,9 @@ export default function CesiumGlobe({ onGlobeReady }) {
       if (scene.skyAtmosphere) {
         scene.skyAtmosphere.show = true
         scene.skyAtmosphere.perFragmentAtmosphere = eff('atmosphere') === 'fragment'
-        scene.skyAtmosphere.brightnessShift = -0.08
+        scene.skyAtmosphere.brightnessShift = -0.14
         scene.skyAtmosphere.saturationShift = 0.0
-        scene.skyAtmosphere.atmosphereLightIntensity = 28.0
+        scene.skyAtmosphere.atmosphereLightIntensity = 22.0
         scene.skyAtmosphere.atmosphereRayleighScaleHeight = 14000
         scene.skyAtmosphere.atmosphereMieScaleHeight = 5000
       }
@@ -490,14 +450,14 @@ export default function CesiumGlobe({ onGlobeReady }) {
       // ---------------------------------------------------------------
       scene.atmosphere.dynamicLighting =
         Cesium.DynamicAtmosphereLightingType.SUNLIGHT
-      scene.atmosphere.lightIntensity = 6.0
+      scene.atmosphere.lightIntensity = 4.5
       scene.atmosphere.rayleighCoefficient = new Cesium.Cartesian3(4.0e-6, 10.0e-6, 22.0e-6)
       scene.atmosphere.rayleighScaleHeight = 12000.0
       scene.atmosphere.mieCoefficient = new Cesium.Cartesian3(8e-6, 8e-6, 8e-6)
       scene.atmosphere.mieScaleHeight = 4000.0
       scene.atmosphere.mieAnisotropy = 0.76
       scene.atmosphere.hueShift = 0.0
-      scene.atmosphere.brightnessShift = -0.06
+      scene.atmosphere.brightnessShift = -0.12
       scene.atmosphere.saturationShift = 0.0
 
       // ---------------------------------------------------------------
@@ -507,7 +467,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
       scene.fog.density = 0.0006
       scene.fog.maxHeight = 60_000_000.0
       // Slightly higher floor so the night limb isn’t a pure black smear next to space
-      scene.fog.minimumBrightness = 0.045
+      scene.fog.minimumBrightness = 0.025
       scene.fog.heightScalar = 0.001
       scene.fog.heightFalloff = 0.59
       scene.fog.visualDensityScalar = 0.15
@@ -519,184 +479,63 @@ export default function CesiumGlobe({ onGlobeReady }) {
       // ---------------------------------------------------------------
       //  Resolution & quality
       // ---------------------------------------------------------------
-      globe.maximumScreenSpaceError = eff('maxScreenSpaceError')
-      globe.tileCacheSize = 1000
-      globe.preloadAncestors = true
       viewer.resolutionScale = eff('resolutionScale')
 
       // ---------------------------------------------------------------
-      //  Photorealistic 3D Tiles (ion) — lazy-loaded via requestIdleCallback
+      //  Google Photorealistic 3D Tiles — THE globe surface
+      //  Loaded directly via Google Maps API key (not Cesium Ion)
       // ---------------------------------------------------------------
-      let photorealisticTilesetRef = null
-      if (ION_TOKEN && eff('tiles3d')) {
-        const loadTiles = async () => {
-          try {
-            const photorealisticTileset = await Cesium.createGooglePhotorealistic3DTileset()
-            if (!destroyed) {
-              photorealisticTileset.maximumScreenSpaceError = 16
-              photorealisticTileset.show = false
-              photorealisticTilesetRef = photorealisticTileset
-              layerRefs.current.tiles3d = photorealisticTileset
-              viewer.scene.primitives.add(photorealisticTileset)
-              scene.requestRender()
-            }
-          } catch {
-            /* Photorealistic 3D Tiles unavailable */
-          }
+      let google3DTilesetRef = null
+      const loadGoogle3DTiles = async () => {
+        if (!GOOGLE_API_KEY) {
+          console.error('[Atlas] VITE_GOOGLE_MAPS_API_KEY is missing — cannot load Google 3D Tiles')
+          // Show fallback: re-enable basic globe so user sees something
+          globe.show = true
+          return
         }
-        // Defer to after interactive
-        if (typeof requestIdleCallback === 'function') {
-          requestIdleCallback(loadTiles)
-        } else {
-          setTimeout(loadTiles, 2000)
-        }
-      }
-
-      // ---------------------------------------------------------------
-      //  Labels overlay — cities, countries, oceans
-      // ---------------------------------------------------------------
-      let labelsLayerRef = null
-      if (eff('labels')) {
         try {
-          const labelsProvider = new Cesium.UrlTemplateImageryProvider({
-            url: 'https://basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png',
-            maximumLevel: 18,
-            credit: 'CartoDB',
+          const tilesetUrl = `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_API_KEY}`
+          const tileset = await Cesium.Cesium3DTileset.fromUrl(tilesetUrl, {
+            showCreditsOnScreen: true,  // Required by Google ToS — do NOT disable
           })
-          const labelsLayer =
-            viewer.imageryLayers.addImageryProvider(labelsProvider)
-          labelsLayer.alpha = 1.0
-          labelsLayer.brightness = 2.0
-          labelsLayer.contrast = 1.5
-          labelsLayer.dayAlpha = 1.0
-          labelsLayer.nightAlpha = 0.55
-          labelsLayerRef = labelsLayer
-          layerRefs.current.labelsLayer = labelsLayer
-        } catch {
-          /* labels unavailable */
+          if (destroyed) return
+
+          // Seamless rendering configuration
+          tileset.maximumScreenSpaceError = 8          // Force higher LOD early
+          tileset.skipLevelOfDetail = false             // Strict hierarchical load — no gaps
+          tileset.foveatedScreenSpaceError = false      // No peripheral degradation
+          tileset.preloadWhenHidden = true              // Prefetch during camera movement
+          tileset.preloadFlightDestinations = true      // Prefetch fly-to targets
+
+          google3DTilesetRef = tileset
+          layerRefs.current.tiles3d = tileset
+          viewer.scene.primitives.add(tileset)
+          scene.requestRender()
+
+          console.log('[Atlas] Google Photorealistic 3D Tiles loaded successfully')
+        } catch (err) {
+          console.error('[Atlas] Failed to load Google 3D Tiles:', err?.message || err)
+          // Surface specific errors
+          if (err?.message?.includes('401') || err?.message?.includes('403')) {
+            console.error('[Atlas] API key error — check VITE_GOOGLE_MAPS_API_KEY and ensure Map Tiles API is enabled in Google Cloud Console')
+          } else if (err?.message?.includes('429')) {
+            console.error('[Atlas] Quota exceeded — Google Maps API rate limit hit')
+          }
+          // Fallback: re-enable basic globe so user sees something
+          globe.show = true
         }
       }
+      // Load immediately — tiles are the primary surface, not a lazy enhancement
+      loadGoogle3DTiles()
 
-      // ---------------------------------------------------------------
-      //  Night lights — NASA Black Marble (city glow) over dimmed day imagery
-      //  • Too little base nightAlpha → flat navy “void”; too much → washes out lights.
-      //  • Ion 3812, else GIBS REST WMTS. Markers are separate primitives.
-      // ---------------------------------------------------------------
-      const nightLayerOpts = {
-        show: true,
-        alpha: 1.0,
-        dayAlpha: 0.0,
-        nightAlpha: 1.0,
-        brightness: 2.2,
-        contrast: 1.3,
-        saturation: 1.18,
-        // Slightly lift shadows so coasts / cities aren’t a solid blue slab
-        gamma: 0.86,
-      }
+      // Labels overlay removed — CartoDB imagery layers require globe.show = true
+      // Google 3D Tiles provide their own visual surface.
 
-      let lightsLayer = null
-      if (eff('nightLights')) {
-        const addNightLayer = (layer) => {
-          if (destroyed || !layer) return
-          viewer.imageryLayers.add(layer)
-          try {
-            viewer.imageryLayers.raiseToTop(layer)
-          } catch {
-            /* ignore */
-          }
-          lightsLayer = layer
-        }
+      // Night lights removed: imagery layers require globe.show = true.
+      // Google 3D Tiles do not support day/night blending.
 
-        if (ION_TOKEN) {
-          try {
-            const ionLayer = await Cesium.ImageryLayer.fromProviderAsync(
-              Cesium.IonImageryProvider.fromAssetId(3812),
-              nightLayerOpts,
-            )
-            addNightLayer(ionLayer)
-          } catch (e) {
-            console.warn('TATVA: Ion Earth at Night / Black Marble (3812) failed:', e?.message || e)
-          }
-        }
-
-        if (!lightsLayer) {
-          try {
-            const gibs = new Cesium.WebMapTileServiceImageryProvider({
-              url:
-                'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_Black_Marble/default/GoogleMapsCompatible_Level9/{TileMatrix}/{TileRow}/{TileCol}.jpg',
-              layer: 'VIIRS_Black_Marble',
-              style: 'default',
-              format: 'image/jpeg',
-              tileMatrixSetID: 'GoogleMapsCompatible_Level9',
-              maximumLevel: 8,
-              credit: 'NASA GIBS — VIIRS Black Marble',
-            })
-            const gibsLayer = new Cesium.ImageryLayer(gibs, nightLayerOpts)
-            addNightLayer(gibsLayer)
-          } catch (e) {
-            console.warn('TATVA: GIBS Black Marble (REST WMTS) failed:', e?.message || e)
-          }
-        }
-
-        if (lightsLayer) {
-          layerRefs.current.lightsLayer = lightsLayer
-          const baseLayer = viewer.imageryLayers.get(0)
-          if (baseLayer && baseLayer !== lightsLayer) {
-            baseLayer.dayAlpha = 1.0
-            // Blend: keep enough base texture on the night side for land/ocean read-through
-            // (0.14 looked like a dead flat navy). ~0.45 matches globe.gl-style balance with BM.
-            baseLayer.nightAlpha = 0.45
-          }
-        }
-      }
-
-      // ---------------------------------------------------------------
-      //  Country borders — lazy-loaded via requestIdleCallback
-      // ---------------------------------------------------------------
-      const loadBorders = async () => {
-        try {
-          const borders = await Cesium.GeoJsonDataSource.load(
-            'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_boundary_lines_land.geojson',
-            {
-              stroke: Cesium.Color.BLACK.withAlpha(0.25),
-              strokeWidth: 0.6,
-              fill: Cesium.Color.TRANSPARENT,
-              markerSize: 0,
-            },
-          )
-          if (!destroyed) {
-            viewer.dataSources.add(borders)
-            scene.requestRender()
-          }
-        } catch { /* borders unavailable */ }
-      }
-
-      const loadStates = async () => {
-        try {
-          const states = await Cesium.GeoJsonDataSource.load(
-            'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_1_states_provinces_lines.geojson',
-            {
-              stroke: Cesium.Color.BLACK.withAlpha(0.15),
-              strokeWidth: 0.35,
-              fill: Cesium.Color.TRANSPARENT,
-              markerSize: 0,
-            },
-          )
-          if (!destroyed) {
-            viewer.dataSources.add(states)
-            scene.requestRender()
-          }
-        } catch { /* state borders unavailable */ }
-      }
-
-      // Defer GeoJSON loads to after globe is interactive
-      if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(loadBorders)
-        requestIdleCallback(loadStates)
-      } else {
-        setTimeout(loadBorders, 3000)
-        setTimeout(loadStates, 4000)
-      }
+      // Country/state borders removed — GeoJSON clampToGround requires globe.show = true.
+      // Google 3D Tiles provide their own visual surface with natural boundaries.
 
       // ---------------------------------------------------------------
       //  Permanent globe layers (v4.0)
@@ -766,17 +605,16 @@ export default function CesiumGlobe({ onGlobeReady }) {
           })
         }
 
-        // Submarine cable routes — dim teal polylines
+        // Submarine cable routes — dim teal polylines (altitude offset, no clampToGround)
         for (const cable of SUBMARINE_CABLE_PATHS) {
-          const positions = cable.points.flatMap(([lng, lat]) => [lng, lat])
+          const positions = cable.points.flatMap(([lng, lat]) => [lng, lat, 5000])
           viewer.entities.add({
             polyline: {
-              positions: Cesium.Cartesian3.fromDegreesArray(positions),
+              positions: Cesium.Cartesian3.fromDegreesArrayHeights(positions),
               width: 1,
               material: new Cesium.ColorMaterialProperty(
                 Cesium.Color.fromCssColorString('#00cfff').withAlpha(0.12)
               ),
-              clampToGround: true,
               distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 25_000_000),
             },
           })
@@ -864,22 +702,8 @@ export default function CesiumGlobe({ onGlobeReady }) {
       viewer.clock.onTick.addEventListener((clock) => {
         if (destroyed) return
 
-        // Show Photorealistic 3D Tiles only when zoomed in
-        if (photorealisticTilesetRef) {
-          const h = viewer.camera.positionCartographic?.height ?? 0
-          photorealisticTilesetRef.show = h < 5_000_000
-        }
-
-        // Fade labels when zoomed far
-        if (labelsLayerRef) {
-          const h = viewer.camera.positionCartographic?.height ?? 0
-          const fadeStart = 6_000_000
-          const fadeEnd = 14_000_000
-          let t = (h - fadeStart) / (fadeEnd - fadeStart)
-          t = Math.min(1, Math.max(0, t))
-          labelsLayerRef.show = t < 1
-          labelsLayerRef.alpha = 1 - t
-        }
+        // Google 3D Tiles are always visible — they ARE the surface
+        // (no zoom-gated show/hide like the old Ion-based tiles)
 
         // Pulse animation: update ALL points at once instead of per-entity CallbackProperty
         const now = performance.now()
@@ -1083,17 +907,14 @@ export default function CesiumGlobe({ onGlobeReady }) {
           return
         }
 
-        // Fallback: click on the globe itself → Street View at that location
-        let cartesian = viewer.scene.pickPosition(click.position)
-        if (!Cesium.defined(cartesian)) {
-          const ray = viewer.camera.getPickRay(click.position)
-          if (ray) {
-            cartesian = viewer.scene.globe.pick(ray, viewer.scene)
-          }
-        }
+        // Fallback: click on the globe surface (Google 3D Tiles) → Street View
+        // With globe.show = false, scene.globe.pick() returns nothing.
+        // Use scene.pickPosition() which picks against the 3D tileset depth buffer.
+        const cartesian = viewer.scene.pickPosition(click.position)
         if (!Cesium.defined(cartesian)) return
 
         const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
+        if (!Cesium.defined(cartographic)) return
         const lat = Cesium.Math.toDegrees(cartographic.latitude)
         const lng = Cesium.Math.toDegrees(cartographic.longitude)
         openStreetView({ lat, lng, source: 'globe' })
@@ -1163,18 +984,21 @@ export default function CesiumGlobe({ onGlobeReady }) {
         const callback = () => {
           removeListener()
           if (!destroyed && onGlobeReadyRef.current) onGlobeReadyRef.current()
+          requestSnapshot()
         }
         removeListener = viewer.scene.postRender.addEventListener(callback)
+      } else {
+        requestSnapshot()
       }
 
       // ---------------------------------------------------------------
-      //  FPS auto-detection (only when tier = 'auto')
+      //  FPS auto-detection (only when priority = 'auto')
       // ---------------------------------------------------------------
       if (useAtlasStore.getState().qualityTier === 'auto') {
         detectQualityTier().then((detected) => {
           if (!destroyed) {
-            useAtlasStore.getState().setResolvedTier(detected)
-            console.log(`[Atlas] Auto-detected quality tier: ${detected}`)
+            useAtlasStore.getState().setResolvedPriority(detected)
+            console.log(`[Atlas] Auto-detected quality priority: ${detected}`)
           }
         })
       }
@@ -1208,8 +1032,8 @@ export default function CesiumGlobe({ onGlobeReady }) {
     const eff = (key) => {
       const st = useAtlasStore.getState()
       if (key in st.qualityOverrides) return st.qualityOverrides[key]
-      const tier = QUALITY_TIERS[st.resolvedTier] || QUALITY_TIERS.high
-      return typeof tier[key] === 'function' ? tier[key]() : tier[key]
+      const priority = QUALITY_TIERS[st.resolvedTier] || QUALITY_TIERS.high
+      return typeof priority[key] === 'function' ? priority[key]() : priority[key]
     }
 
     const scene = viewer.scene
@@ -1237,25 +1061,12 @@ export default function CesiumGlobe({ onGlobeReady }) {
       scene.skyAtmosphere.perFragmentAtmosphere = atm === 'fragment'
     }
 
-    // Night lights
-    if (layerRefs.current.lightsLayer) {
-      layerRefs.current.lightsLayer.show = eff('nightLights')
-    }
-
-    // Labels
-    if (layerRefs.current.labelsLayer) {
-      layerRefs.current.labelsLayer.show = eff('labels')
-    }
-
-    // 3D Tiles
+    // Google 3D Tiles — adjust SSE based on quality tier
     if (layerRefs.current.tiles3d) {
-      layerRefs.current.tiles3d.show = eff('tiles3d')
+      layerRefs.current.tiles3d.maximumScreenSpaceError = eff('maxScreenSpaceError')
     }
 
-    // Screen space error
-    scene.globe.maximumScreenSpaceError = eff('maxScreenSpaceError')
-
-    // Auto-rotate — keep in sync when user toggles Settings or tier changes
+    // Auto-rotate — keep in sync when user toggles Settings or priority changes
     const ar = eff('autoRotate')
     effectiveAutoRotateRef.current = ar
     idleSpinGateRef.current = ar
@@ -1303,7 +1114,16 @@ export default function CesiumGlobe({ onGlobeReady }) {
 
   useEffect(() => {
     const viewer = viewerRef.current
-    if (!viewer || viewer.isDestroyed()) return
+    if (!viewer || viewer.isDestroyed()) {
+      // Viewer isn't ready yet — schedule a retry instead of dropping events
+      const retryTimer = setTimeout(() => {
+        const v = viewerRef.current
+        if (v && !v.isDestroyed() && events.length > 0) {
+          rebuildEventMarkers(v, events)
+        }
+      }, 1500)
+      return () => clearTimeout(retryTimer)
+    }
     if (events.length === 0 && eventBillboardMapRef.current.size === 0) return
 
     rebuildEventMarkers(viewer, events)
@@ -1317,8 +1137,8 @@ export default function CesiumGlobe({ onGlobeReady }) {
     // Build cluster enclosures
     const clusters = clusterEvents(events, 200, 5)
     for (const cluster of clusters) {
-      const tierColor = TIER_COLORS[cluster.tier] || '#1a90ff'
-      const color = Cesium.Color.fromCssColorString(tierColor)
+      const dimensionColor = DIMENSION_COLORS[cluster.dimension] || '#1a90ff'
+      const color = Cesium.Color.fromCssColorString(dimensionColor)
 
       // Build convex hull from cluster events
       const points = cluster.events.map(e => [e.lng, e.lat])
@@ -1357,7 +1177,7 @@ export default function CesiumGlobe({ onGlobeReady }) {
     }
 
     viewer.scene.requestRender()
-  }, [events, activeDomains, severityFloor]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [events, activeDimensions, priorityFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div

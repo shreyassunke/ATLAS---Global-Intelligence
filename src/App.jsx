@@ -13,14 +13,11 @@ import FilterPanel from './components/UI/FilterPanel'
 import NewsCard from './components/UI/NewsCard'
 import EventPanel from './components/UI/EventPanel'
 import LiveTicker from './components/Feed/LiveTicker'
-import NewsSidebar from './components/Feed/NewsSidebar'
 import HoverLabel from './components/UI/RegionRing'
-import ClockOverlay from './components/UI/ClockOverlay'
 import StreetViewOverlay from './components/UI/StreetViewOverlay'
 import YouTubeEmbedOverlay from './components/UI/YouTubeEmbedOverlay'
 import SettingsPanel from './components/UI/SettingsPanel'
-import SourcesPanel from './components/UI/SourcesPanel'
-import DomainFilters from './components/UI/DomainFilters'
+import DimensionFilters from './components/UI/DimensionFilters'
 import { usePreferencesSync } from './hooks/usePreferencesSync'
 import LandingPage from './components/Landing/LandingPage'
 
@@ -46,10 +43,7 @@ export default function App() {
   const initEventBusSystem = useAtlasStore((s) => s.initEventBusSystem)
   const isCesium = globeMode === 'cesium'
   const filterParams = useAtlasStore((s) => s.filterParams)
-  const newsSidebarOpen = useAtlasStore((s) => s.newsSidebarOpen)
-  const setNewsSidebarOpen = useAtlasStore((s) => s.setNewsSidebarOpen)
   const colorblindMode = useAtlasStore((s) => s.colorblindMode)
-  const [sourcesOpen, setSourcesOpen] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   useNewsData()
   usePreferencesSync()
@@ -235,11 +229,9 @@ export default function App() {
                   <Header
                     hudHidden={hudHidden}
                     onToggleHud={() => setHudHidden((v) => !v)}
-                    onToggleSources={() => setSourcesOpen((v) => !v)}
                     onToggleFilters={() => setFiltersOpen((v) => !v)}
                     filtersOpen={filtersOpen}
                   />
-                  <ClockOverlay />
 
                   <AnimatePresence>
                     {filtersOpen && (
@@ -250,7 +242,7 @@ export default function App() {
                         exit={{ opacity: 0, x: -12 }}
                         transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                       >
-                        <DomainFilters />
+                        <DimensionFilters />
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -262,8 +254,6 @@ export default function App() {
                   <HoverLabel />
                   <LiveTicker />
                   <SettingsPanel />
-                  <SourcesPanel open={sourcesOpen} onClose={() => setSourcesOpen(false)} />
-                  <NewsSidebar open={newsSidebarOpen} onClose={() => setNewsSidebarOpen(false)} />
                 </motion.div>
               )}
             </AnimatePresence>

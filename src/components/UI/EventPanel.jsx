@@ -1,6 +1,10 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
-import { TIER_COLORS, DOMAINS } from '../../core/eventSchema'
+import {
+  DIMENSION_COLORS, DIMENSIONS, DIMENSION_LABELS, DIMENSION_ICONS,
+  PRIORITIES, PRIORITY_LABELS, formatToneScore
+} from '../../core/eventSchema'
+import CausalThread from './CausalThread'
 
 const IconStreetView = () => (
   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -9,16 +13,6 @@ const IconStreetView = () => (
     <path d="M6 16l6 4 6-4" />
   </svg>
 )
-
-const DOMAIN_LABELS = {
-  [DOMAINS.CONFLICT]: { label: 'CONFLICT', icon: '⚔' },
-  [DOMAINS.CYBER]: { label: 'CYBER / INFRA', icon: '⚡' },
-  [DOMAINS.NATURAL]: { label: 'NATURAL', icon: '🌊' },
-  [DOMAINS.HUMANITARIAN]: { label: 'HUMANITARIAN', icon: '👤' },
-  [DOMAINS.ECONOMIC]: { label: 'ECONOMIC', icon: '📈' },
-  [DOMAINS.SIGNALS]: { label: 'SIGNALS', icon: '◎' },
-  [DOMAINS.HAZARD]: { label: 'EXTREME HAZARD', icon: '☢' },
-}
 
 function timeAgo(dateStr) {
   if (!dateStr) return ''
@@ -42,7 +36,7 @@ export default function EventPanel() {
           key="event-panel"
           className="event-panel"
           role="dialog"
-          aria-label={`${selectedEvent.tier} ${selectedEvent.domain} event: ${selectedEvent.title}`}
+          aria-label={`${DIMENSION_LABELS[selectedEvent.dimension] || selectedEvent.dimension} event: ${selectedEvent.title}`}
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: -20 }}
@@ -50,22 +44,30 @@ export default function EventPanel() {
         >
           <div className="event-panel-header">
             <div style={{ flex: 1 }}>
+              {/* Dimension badge — color-coded circle + civilian label */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className={`event-tier-badge event-tier-${selectedEvent.tier}`}>
-                  {selectedEvent.tier}
+                <span
+                  className="event-dimension-badge"
+                  style={{
+                    '--dim-color': DIMENSION_COLORS[selectedEvent.dimension] || '#378ADD',
+                  }}
+                >
+                  <span
+                    className="event-dimension-dot"
+                    style={{ backgroundColor: DIMENSION_COLORS[selectedEvent.dimension] }}
+                  />
+                  {DIMENSION_LABELS[selectedEvent.dimension] || selectedEvent.dimension}
                 </span>
-                <span style={{
-                  fontFamily: 'var(--font-hud)',
-                  fontSize: '9px',
-                  letterSpacing: '0.15em',
-                  color: 'var(--text-muted)',
-                  opacity: 0.6,
-                }}>
-                  {DOMAIN_LABELS[selectedEvent.domain]?.icon}{' '}
-                  {DOMAIN_LABELS[selectedEvent.domain]?.label || selectedEvent.domain}
+                <span className={`event-priority-indicator event-priority-${selectedEvent.priority}`}>
+                  {PRIORITY_LABELS[selectedEvent.priority] || selectedEvent.priority?.toUpperCase()}
                 </span>
               </div>
+              {/* Headline — raw from source, unedited */}
               <h3 className="event-panel-title">{selectedEvent.title}</h3>
+              {/* Source attribution + timestamp */}
+              <div className="event-panel-attribution">
+                {selectedEvent.source} · {timeAgo(selectedEvent.timestamp)}
+              </div>
             </div>
             <button
               className="feed-close-btn"
@@ -85,16 +87,16 @@ export default function EventPanel() {
                     <div
                       key={n}
                       className={`event-severity-pip ${n <= selectedEvent.severity ? 'active' : ''}`}
-                      style={n <= selectedEvent.severity ? { '--pip-color': TIER_COLORS[selectedEvent.tier] } : {}}
+                      style={n <= selectedEvent.severity ? { '--pip-color': DIMENSION_COLORS[selectedEvent.dimension] } : {}}
                     />
                   ))}
                 </div>
               </div>
 
               <div className="event-meta-item">
-                <span className="event-meta-label">Confidence</span>
+                <span className="event-meta-label">Sources</span>
                 <span className="event-meta-value">
-                  {Math.round(selectedEvent.opacity * 100)}%
+                  {selectedEvent.corroborationCount} source{selectedEvent.corroborationCount !== 1 ? 's' : ''}
                   {selectedEvent.authoritative && (
                     <span className="source-badge-auth" style={{ marginLeft: 6 }}>AUTH</span>
                   )}
@@ -106,6 +108,11 @@ export default function EventPanel() {
                 <span className="event-meta-value">
                   {selectedEvent.latApproximate ? '≈ ' : ''}
                   {selectedEvent.lat.toFixed(2)}°, {selectedEvent.lng.toFixed(2)}°
+                  {selectedEvent.locationName && (
+                    <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', opacity: 0.7 }}>
+                      {selectedEvent.locationName}
+                    </span>
+                  )}
                 </span>
               </div>
 
@@ -114,17 +121,22 @@ export default function EventPanel() {
                 <span className="event-meta-value">{timeAgo(selectedEvent.timestamp)}</span>
               </div>
 
-              <div className="event-meta-item">
-                <span className="event-meta-label">Sources</span>
-                <span className="event-meta-value">
-                  {selectedEvent.corroborationCount} ({selectedEvent.corroborationSources.join(', ')})
-                </span>
-              </div>
-
-              <div className="event-meta-item">
-                <span className="event-meta-label">Source</span>
-                <span className="event-meta-value">{selectedEvent.source}</span>
-              </div>
+              {/* GDELT tone score — "Global coverage tone" */}
+              {selectedEvent.toneScore != null && (
+                <div className="event-meta-item" style={{ gridColumn: '1 / -1' }}>
+                  <span className="event-meta-label">Global Coverage Tone</span>
+                  <span className="event-meta-value">
+                    {(() => {
+                      const tone = formatToneScore(selectedEvent.toneScore)
+                      return (
+                        <span className={`tone-indicator tone-${tone.sentiment}`}>
+                          {tone.label} ({tone.score})
+                        </span>
+                      )
+                    })()}
+                  </span>
+                </div>
+              )}
             </div>
 
             {selectedEvent.detail && (
@@ -140,9 +152,9 @@ export default function EventPanel() {
                 fontFamily: 'var(--font-hud)',
                 fontSize: '9px',
                 letterSpacing: '0.15em',
-                color: 'var(--tier-active)',
+                color: 'var(--priority-p2)',
               }}>
-                ⚠ DISPUTED — sources disagree on severity
+                ⚠ Sources disagree on severity
               </div>
             )}
 
@@ -164,6 +176,9 @@ export default function EventPanel() {
                 ))}
               </div>
             )}
+
+            {/* Causal thread — Related Signals section */}
+            <CausalThread event={selectedEvent} />
 
             <div style={{ display: 'flex', gap: 6 }}>
               {selectedEvent.sourceUrl && (
@@ -189,7 +204,7 @@ export default function EventPanel() {
                       meta: {
                         title: selectedEvent.title,
                         detail: selectedEvent.detail,
-                        domain: selectedEvent.domain,
+                        dimension: selectedEvent.dimension,
                         source: selectedEvent.source,
                       },
                     })

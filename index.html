@@ -21,5 +21,10 @@
   <body class="bg-[#030712] text-white overflow-hidden">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw-globe-cache.js');
+      }
+    </script>
   </body>
 </html>

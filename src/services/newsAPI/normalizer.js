@@ -53,10 +53,10 @@ export function normalizeTheNewsApiArticle(raw) {
     publishedAtKey: 'published_at',
     descriptionKeys: ['description', 'snippet'],
     extractSource: (r) => {
-      const sourceDomain = r.source || 'unknown'
-      const sourceName = sourceDomain.replace(/\.(com|org|net|co\.\w+)$/, '').replace(/\./g, ' ')
+      const sourceDimension = r.source || 'unknown'
+      const sourceName = sourceDimension.replace(/\.(com|org|net|co\.\w+)$/, '').replace(/\./g, ' ')
       return {
-        id: sourceDomain.replace(/\./g, '-'),
+        id: sourceDimension.replace(/\./g, '-'),
         name: sourceName,
         country: (r.locale || '').toLowerCase(),
       }

@@ -5,11 +5,11 @@ import { useAtlasStore } from '../../store/atlasStore'
 
 const DOMAIN_REGEX = /^([a-z0-9-]+\.)+[a-z]{2,}$/i
 
-function isDomain(text) {
+function isDimension(text) {
   return DOMAIN_REGEX.test(text.trim())
 }
 
-function extractDomain(text) {
+function extractDimension(text) {
   return text.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '').toLowerCase()
 }
 
@@ -73,18 +73,18 @@ export default function SourceSearch({ compact = false, variant = 'default' }) {
     [addSource],
   )
 
-  const handleAddDomain = useCallback(() => {
-    const domain = extractDomain(query)
-    if (!domain) return
-    addSource({ id: domain, name: domain, type: 'domain' })
+  const handleAddDimension = useCallback(() => {
+    const dimension = extractDimension(query)
+    if (!dimension) return
+    addSource({ id: dimension, name: dimension, type: 'dimension' })
     setQuery('')
     setResults([])
   }, [query, addSource])
 
-  const showDomainOption =
+  const showDimensionOption =
     query.trim().length > 3 &&
     results.length === 0 &&
-    isDomain(extractDomain(query))
+    isDimension(extractDimension(query))
 
   const containerClass = compact
     ? 'w-full'
@@ -123,7 +123,7 @@ export default function SourceSearch({ compact = false, variant = 'default' }) {
 
       {/* Results dropdown */}
       <AnimatePresence>
-        {(results.length > 0 || showDomainOption) && (
+        {(results.length > 0 || showDimensionOption) && (
           <motion.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -171,9 +171,9 @@ export default function SourceSearch({ compact = false, variant = 'default' }) {
               )
             })}
 
-            {showDomainOption && (
+            {showDimensionOption && (
               <button
-                onClick={handleAddDomain}
+                onClick={handleAddDimension}
                 className="w-full px-5 py-4 flex items-center gap-4 text-left
                            hover:bg-white/[0.06] transition-colors border-t border-white/[0.06] cursor-pointer"
               >
@@ -183,10 +183,10 @@ export default function SourceSearch({ compact = false, variant = 'default' }) {
                 </div>
                 <div>
                   <div className="text-sm text-white">
-                    Add <span className="text-[var(--accent)] font-medium">{extractDomain(query)}</span> as custom source
+                    Add <span className="text-[var(--accent)] font-medium">{extractDimension(query)}</span> as custom source
                   </div>
                   <div className="text-[11px] text-white/40 mt-1">
-                    Fetches articles via domain search
+                    Fetches articles via dimension search
                   </div>
                 </div>
               </button>

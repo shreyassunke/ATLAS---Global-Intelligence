@@ -72,13 +72,13 @@ export default function SettingsPanel() {
         }
     }, [settingsOpen, setSettingsOpen])
 
-    // Effective tier for display
-    const activeTier = QUALITY_TIERS[resolvedTier] || QUALITY_TIERS.high
+    // Effective priority for display
+    const activePriority = QUALITY_TIERS[resolvedTier] || QUALITY_TIERS.high
 
     // Get effective value for a toggle key
     function getEffective(key) {
         if (key in qualityOverrides) return qualityOverrides[key]
-        return activeTier[key]
+        return activePriority[key]
     }
 
     const isCesium = globeMode === 'cesium'
@@ -148,7 +148,7 @@ export default function SettingsPanel() {
                             })}
                         </div>
                         <div className="settings-hint">
-                            Toggle intelligence layers on the globe. Data provided by the GDELT Project, NASA, and USGS.
+                            Toggle data layers on the globe. Data provided by the GDELT Project, NASA, and USGS.
                         </div>
                     </div>
 

@@ -9,7 +9,7 @@
  * Map context (closer to Cesium): Natural Earth country + state/province
  * outlines (paths layer, black strokes with alpha like Cesium), and Carto
  * `light_only_labels` raster tiles (SlippyMap) with higher max zoom on
- * high tiers so smaller places appear when zoomed in. District-level
+ * high prioritys so smaller places appear when zoomed in. District-level
  * vector boundaries stay omitted (very heavy GeoJSON).
  *
  * Day/night cycle reference: https://globe.gl/example/day-night-cycle/
@@ -23,39 +23,18 @@ import {
     AdditiveBlending, Color,
     MeshBasicMaterial,
 } from 'three'
-import SlippyMap from 'three-slippy-map-globe'
 import * as solar from 'solar-calculator'
 import { useAtlasStore } from '../../store/atlasStore'
+import { isMobileDevice } from '../../config/qualityTiers'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { getCategoryColor } from '../../utils/categoryColors'
-import { TIER_COLORS } from '../../core/eventSchema'
+import { DIMENSION_COLORS } from '../../core/eventSchema'
 
 // Textures (CDN)
 const EARTH_DAY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-day.jpg'
 const EARTH_NIGHT = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-night.jpg'
 const EARTH_BUMP = 'https://unpkg.com/three-globe/example/img/earth-topology.png'
 const BG_IMG = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/night-sky.png'
-
-/**
- * Carto label-only tiles. `dark_only_labels` is for dark basemaps and disappears on bright
- * satellite / day-side terrain — `light_only_labels` uses dark glyphs, readable on imagery.
- */
-const CARTO_LABEL_TILE_URL = (x, y, l) =>
-    `https://basemaps.cartocdn.com/light_only_labels/${l}/${x}/${y}@2x.png`
-
-/** Natural Earth — boundary lines (same family as Cesium; resolution scales with tier) */
-const NE_ADMIN0_110M =
-    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_boundary_lines_land.geojson'
-const NE_ADMIN0_50M =
-    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_boundary_lines_land.geojson'
-const NE_ADMIN1_50M =
-    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_1_states_provinces_lines.geojson'
-const NE_ADMIN1_10M =
-    'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces_lines.geojson'
-
-/** CesiumGlobe parity: black strokes with alpha + relative widths (mapped to FatLine px) */
-const STROKE_COUNTRY = { color: 'rgba(0, 0, 0, 0.25)', strokePx: 1.35 }
-const STROKE_STATE = { color: 'rgba(0, 0, 0, 0.15)', strokePx: 0.85 }
 
 const POINT_ALTITUDE = 0.01
 const RING_MAX_RADIUS = 3
@@ -221,75 +200,6 @@ function unitVecToLatLng(v) {
     return [lat, lng]
 }
 
-function greatCircleSlerp(a, b, t) {
-    const dot = Math.max(-1, Math.min(1, a.x * b.x + a.y * b.y + a.z * b.z))
-    const omega = Math.acos(dot)
-    if (omega < 1e-7) return { x: a.x, y: a.y, z: a.z }
-    const s0 = Math.sin((1 - t) * omega) / Math.sin(omega)
-    const s1 = Math.sin(t * omega) / Math.sin(omega)
-    return {
-        x: s0 * a.x + s1 * b.x,
-        y: s0 * a.y + s1 * b.y,
-        z: s0 * a.z + s1 * b.z,
-    }
-}
-
-/**
- * Insert points along great-circle arcs so long GeoJSON edges don't look like
- * flat rhumb cuts on the sphere (reduces the “hand-painted” segmented look).
- */
-function densifyLatLngAlongGreatCircle(latLngCoords, maxCentralDeg = 1.15) {
-    if (!latLngCoords?.length) return latLngCoords
-    const out = []
-    for (let i = 0; i < latLngCoords.length; i++) {
-        out.push(latLngCoords[i])
-        if (i >= latLngCoords.length - 1) break
-        const [latA, lngA] = latLngCoords[i]
-        const [latB, lngB] = latLngCoords[i + 1]
-        const va = latLngToUnitVec(latA, lngA)
-        const vb = latLngToUnitVec(latB, lngB)
-        const dot = Math.max(-1, Math.min(1, va.x * vb.x + va.y * vb.y + va.z * vb.z))
-        const centralDeg = (Math.acos(dot) * 180) / Math.PI
-        const n = Math.max(0, Math.ceil(centralDeg / maxCentralDeg) - 1)
-        for (let k = 1; k <= n; k++) {
-            const t = k / (n + 1)
-            const w = greatCircleSlerp(va, vb, t)
-            out.push(unitVecToLatLng(w))
-        }
-    }
-    return out
-}
-
-/**
- * GeoJSON LineString / MultiLineString / GeometryCollection → globe.gl paths.
- * GeoJSON uses [lng, lat]; three-globe paths use [lat, lng] per point.
- */
-function geoJsonLineFeaturesToPaths(geojson, color, strokePx) {
-    const out = []
-    const pushLine = (lineCoords) => {
-        if (!lineCoords?.length) return
-        const mapped = lineCoords.map(([lng, lat]) => [lat, lng])
-        const coords = densifyLatLngAlongGreatCircle(mapped, 1.1)
-        if (coords.length < 2) return
-        out.push({ coords, color, stroke: strokePx })
-    }
-    const handleGeom = (geom) => {
-        if (!geom) return
-        if (geom.type === 'LineString') pushLine(geom.coordinates)
-        else if (geom.type === 'MultiLineString') {
-            for (const line of geom.coordinates) pushLine(line)
-        } else if (geom.type === 'GeometryCollection') {
-            for (const g of geom.geometries ?? []) handleGeom(g)
-        }
-    }
-    if (geojson.type === 'FeatureCollection') {
-        for (const f of geojson.features ?? []) handleGeom(f.geometry)
-    } else if (geojson.type === 'Feature') {
-        handleGeom(geojson.geometry)
-    }
-    return out
-}
-
 export default function GlobeGLView({ onGlobeReady }) {
     const containerRef = useRef(null)
     const globeRef = useRef(null)
@@ -308,6 +218,7 @@ export default function GlobeGLView({ onGlobeReady }) {
     const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
     const resolvedTier = useAtlasStore((s) => s.resolvedTier)
     const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
+    const isMobile = isMobileDevice()
 
     /** Map event source IDs to data layer keys */
     const sourceToLayer = useCallback((source) => {
@@ -320,9 +231,9 @@ export default function GlobeGLView({ onGlobeReady }) {
         return null // other sources always visible
     }, [])
 
-    /** Get event marker color by tier */
+    /** Get event marker color by priority */
     const getEventColor = useCallback((event) => {
-        return TIER_COLORS[event.tier] || TIER_COLORS.latent
+        return DIMENSION_COLORS[event.dimension] || '#1a90ff'
     }, [])
 
     /** Get event point radius based on severity */
@@ -332,15 +243,9 @@ export default function GlobeGLView({ onGlobeReady }) {
     }, [])
 
     const getVisibleItems = useCallback(() => {
-        // News items (only if 'news' layer is on)
-        const newsVisible = dataLayers.news !== false
-            ? newsItems.filter(
-                (item) =>
-                    item.lat != null &&
-                    item.lng != null &&
-                    activeCategories.has(item.category),
-            ).map(item => ({ ...item, _isNews: true }))
-            : []
+        // Standard news items are no longer plotted on the globe per user request.
+        // The globe is reserved exclusively for intelligence and GDELT database records.
+        const newsVisible = []
 
         // EventBus events (filtered by data layers and valid coords)
         const eventVisible = events
@@ -354,7 +259,7 @@ export default function GlobeGLView({ onGlobeReady }) {
                 ...evt,
                 lat: evt.lat,
                 lng: evt.lng,
-                category: evt.domain || 'signals',
+                category: evt.dimension || 'signals',
                 _isEvent: true,
                 _color: getEventColor(evt),
                 _radius: getEventRadius(evt),
@@ -381,15 +286,21 @@ export default function GlobeGLView({ onGlobeReady }) {
             .width(initW)
             .height(initH)
             .backgroundImageUrl(BG_IMG)
-            .bumpImageUrl(EARTH_BUMP)
+            .bumpImageUrl(isMobile ? null : EARTH_BUMP)
             .showGlobe(true)
-            .showAtmosphere(true)
+            .showAtmosphere(!isMobile)
             .atmosphereColor('rgba(0, 180, 255, 0.25)')
             .atmosphereAltitude(0.18)
             .pointOfView({ lat: homeView.lat, lng: homeView.lng, altitude: 2.5 })
 
         if (typeof globe.rendererSize === 'function') {
             globe.rendererSize(new Vector2(initW, initH))
+        }
+        
+        // Force pixel ratio down for better fill rate on mobile GPUs
+        if (globe.renderer && typeof globe.renderer === 'function') {
+            const renderer = globe.renderer()
+            if (renderer) renderer.setPixelRatio(isMobile ? 1 : Math.min(window.devicePixelRatio, 2))
         }
 
         // Extend camera far plane so the sun (at ~23,500 units) isn't clipped
@@ -435,99 +346,94 @@ export default function GlobeGLView({ onGlobeReady }) {
         scene.add(sunLight)
 
         // Visible sun — two additive-blended sprites: photospheric disc + corona glow
-        // Sized per NASA angular-diameter data (see constants above)
-        const sunCore = new Sprite(new SpriteMaterial({
-            map: createSunTexture(512, 'core'),
-            color: new Color(0xffffff),
-            transparent: true,
-            blending: AdditiveBlending,
-            depthWrite: false,
-        }))
-        sunCore.scale.set(SUN_DISC_SIZE, SUN_DISC_SIZE, 1)
-        scene.add(sunCore)
+        // Disabled on mobile to reduce overdraw
+        let sunCore, sunGlow
+        if (!isMobile) {
+            sunCore = new Sprite(new SpriteMaterial({
+                map: createSunTexture(512, 'core'),
+                color: new Color(0xffffff),
+                transparent: true,
+                blending: AdditiveBlending,
+                depthWrite: false,
+            }))
+            sunCore.scale.set(SUN_DISC_SIZE, SUN_DISC_SIZE, 1)
+            scene.add(sunCore)
 
-        const sunGlow = new Sprite(new SpriteMaterial({
-            map: createSunTexture(512, 'glow'),
-            color: new Color(0xffeedd),
-            transparent: true,
-            blending: AdditiveBlending,
-            depthWrite: false,
-        }))
-        sunGlow.scale.set(SUN_GLOW_SIZE, SUN_GLOW_SIZE, 1)
-        scene.add(sunGlow)
-
-        // Carto label-tile overlay (initialised below; animate() needs the reference)
-        let labelTileLayer = null
+            sunGlow = new Sprite(new SpriteMaterial({
+                map: createSunTexture(512, 'glow'),
+                color: new Color(0xffeedd),
+                transparent: true,
+                blending: AdditiveBlending,
+                depthWrite: false,
+            }))
+            sunGlow.scale.set(SUN_GLOW_SIZE, SUN_GLOW_SIZE, 1)
+            scene.add(sunGlow)
+        }
 
         // ── Day/night shader material ──
-        const loader = new TextureLoader()
-        Promise.all([
-            loader.loadAsync(EARTH_DAY),
-            loader.loadAsync(EARTH_NIGHT),
-        ]).then(([dayTex, nightTex]) => {
-            if (destroyed) return
-
-            const material = new ShaderMaterial({
-                uniforms: {
-                    dayTexture: { value: dayTex },
-                    nightTexture: { value: nightTex },
-                    sunPosition: { value: new Vector2() },
-                    globeRotation: { value: new Vector2() },
-                },
-                vertexShader: dayNightShader.vertexShader,
-                fragmentShader: dayNightShader.fragmentShader,
-            })
-
-            globe.globeMaterial(material)
-
-            // Sync day/night + sun objects with real-world time
-            function animate() {
+        if (isMobile) {
+            // Extreme optimization for mobile: skip per-pixel day/night shader math
+            globe.globeImageUrl(EARTH_NIGHT)
+            
+            function animateMobile() {
+                if (destroyed) return
+                animFrameRef.current = requestAnimationFrame(animateMobile)
+                const [sunLng, sunLat] = sunPosAt(Date.now())
+                const sunWorldPos = sunToWorldPos(sunLng, sunLat)
+                sunLight.position.copy(sunWorldPos)
+            }
+            animFrameRef.current = requestAnimationFrame(animateMobile)
+        } else {
+            const loader = new TextureLoader()
+            Promise.all([
+                loader.loadAsync(EARTH_DAY),
+                loader.loadAsync(EARTH_NIGHT),
+            ]).then(([dayTex, nightTex]) => {
                 if (destroyed) return
 
-                const [sunLng, sunLat] = sunPosAt(Date.now())
-                material.uniforms.sunPosition.value.set(sunLng, sunLat)
+                const material = new ShaderMaterial({
+                    uniforms: {
+                        dayTexture: { value: dayTex },
+                        nightTexture: { value: nightTex },
+                        sunPosition: { value: new Vector2() },
+                        globeRotation: { value: new Vector2() },
+                    },
+                    vertexShader: dayNightShader.vertexShader,
+                    fragmentShader: dayNightShader.fragmentShader,
+                })
 
-                // Keep globeRotation uniform in sync with camera
-                const pov = globe.pointOfView()
-                if (pov) {
-                    material.uniforms.globeRotation.value.set(pov.lng ?? 0, pov.lat ?? 0)
+                globe.globeMaterial(material)
+
+                // Sync day/night + sun objects with real-world time
+                function animate() {
+                    if (destroyed) return
+
+                    const [sunLng, sunLat] = sunPosAt(Date.now())
+                    material.uniforms.sunPosition.value.set(sunLng, sunLat)
+
+                    // Keep globeRotation uniform in sync with camera
+                    const pov = globe.pointOfView()
+                    if (pov) {
+                        material.uniforms.globeRotation.value.set(pov.lng ?? 0, pov.lat ?? 0)
+                    }
+
+                    // Move the visible sun + directional light to match
+                    const sunWorldPos = sunToWorldPos(sunLng, sunLat)
+                    if (sunCore) sunCore.position.copy(sunWorldPos)
+                    if (sunGlow) sunGlow.position.copy(sunWorldPos)
+                    sunLight.position.copy(sunWorldPos)
+
+                    // Subtle corona pulse (±5 % over ~6 s)
+                    if (sunGlow) {
+                        const pulse = 1 + 0.05 * Math.sin(Date.now() * 0.001)
+                        sunGlow.scale.setScalar(SUN_GLOW_SIZE * pulse)
+                    }
+
+                    animFrameRef.current = requestAnimationFrame(animate)
                 }
-
-                // Move the visible sun + directional light to match
-                const sunWorldPos = sunToWorldPos(sunLng, sunLat)
-                sunCore.position.copy(sunWorldPos)
-                sunGlow.position.copy(sunWorldPos)
-                sunLight.position.copy(sunWorldPos)
-
-                // Subtle corona pulse (±5 % over ~6 s)
-                const pulse = 1 + 0.05 * Math.sin(Date.now() * 0.001)
-                sunGlow.scale.setScalar(SUN_GLOW_SIZE * pulse)
-
-                // Raster map labels (Carto) — keep tile LOD in sync with the camera
-                if (labelTileLayer) {
-                    labelTileLayer.updatePov(camera)
-                    labelTileLayer.traverse((o) => {
-                        if (!o.isMesh || !o.material?.map || o.userData.atlasLabelMatDone) return
-                        o.userData.atlasLabelMatDone = true
-                        // SlippyMap defaults to MeshLambertMaterial — scene lights wash out / crush
-                        // raster labels. Unlit basic material keeps Carto PNGs readable.
-                        const map = o.material.map
-                        o.material.dispose()
-                        o.material = new MeshBasicMaterial({
-                            map,
-                            transparent: true,
-                            depthWrite: false,
-                            depthTest: true,
-                            toneMapped: false,
-                        })
-                        o.renderOrder = 5
-                    })
-                }
-
                 animFrameRef.current = requestAnimationFrame(animate)
-            }
-            animFrameRef.current = requestAnimationFrame(animate)
-        })
+            })
+        }
 
         // ── Points layer ──
         // pointsMerge MUST be false for per-point click/hover events to fire
@@ -543,12 +449,16 @@ export default function GlobeGLView({ onGlobeReady }) {
             })
             .pointsMerge(false)
             .onPointClick((d) => {
-                if (d._isEvent) {
-                    // Select as intelligence event
+                if (d._isEvent && d.source === 'GDELT') {
+                    // Open GDELT events as NewsCards per user design request
+                    setSelectedMarker(d)
+                    setSelectedEvent(null)
+                } else if (d._isEvent) {
+                    // Select as traditional intelligence event panel
                     setSelectedEvent(d)
                     setSelectedMarker(null)
                 } else {
-                    // Open the NewsCard (same as CesiumGlobe)
+                    // Open the NewsCard (legacy fallback)
                     setSelectedMarker(d)
                     setSelectedEvent(null)
                 }
@@ -598,9 +508,9 @@ export default function GlobeGLView({ onGlobeReady }) {
             .ringLat('lat')
             .ringLng('lng')
             .ringColor((d) => {
-                // Use tier color for events, category color for news
+                // Use priority color for events, category color for news
                 const c = d._isEvent
-                    ? (d._color || TIER_COLORS.latent)
+                    ? (d._color || '#1a90ff')
                     : getCategoryColor(d.category)
                 return (t) => {
                     const alpha = 1 - t
@@ -619,77 +529,6 @@ export default function GlobeGLView({ onGlobeReady }) {
             .ringPropagationSpeed(RING_PROPAGATION_SPEED)
             .ringRepeatPeriod(() => 2000 + Math.random() * 2000)
             .ringAltitude(POINT_ALTITUDE)
-
-        // ── Political boundaries (Natural Earth → paths), lazy-loaded — parity with Cesium
-        globe
-            .pathsData([])
-            .pathPoints('coords')
-            .pathPointAlt(0.009)
-            // Finer angular step between interpolated vertices → smoother polylines on the sphere
-            .pathResolution(0.1)
-            .pathColor((d) => d.color)
-            // LineMaterial.linewidth is in screen pixels when FatLine is used
-            .pathStroke((d) => (d.stroke != null ? d.stroke : null))
-
-        const tierAtInit = useAtlasStore.getState().resolvedTier
-        const includeStateBorders = tierAtInit !== 'low'
-        const admin0Url = tierAtInit === 'low' ? NE_ADMIN0_110M : NE_ADMIN0_50M
-        const admin1Url = tierAtInit === 'high' ? NE_ADMIN1_10M : NE_ADMIN1_50M
-
-        let mapOutlinesLoaded = false
-        const loadMapOutlines = async () => {
-            if (destroyed || mapOutlinesLoaded) return
-            try {
-                const admin0Res = await fetch(admin0Url)
-                const admin0 = await admin0Res.json()
-                const paths = [
-                    ...geoJsonLineFeaturesToPaths(
-                        admin0,
-                        STROKE_COUNTRY.color,
-                        STROKE_COUNTRY.strokePx,
-                    ),
-                ]
-                if (includeStateBorders) {
-                    const admin1Res = await fetch(admin1Url)
-                    const admin1 = await admin1Res.json()
-                    paths.push(
-                        ...geoJsonLineFeaturesToPaths(
-                            admin1,
-                            STROKE_STATE.color,
-                            STROKE_STATE.strokePx,
-                        ),
-                    )
-                }
-                if (!destroyed) {
-                    mapOutlinesLoaded = true
-                    globe.pathsData(paths)
-                }
-            } catch {
-                /* network / CORS */
-            }
-        }
-        // Load soon (requestIdleCallback alone can starve on a busy main thread)
-        setTimeout(loadMapOutlines, 400)
-
-        // ── Carto label tiles (slippy overlay) — same idea as Cesium `dark_only_labels` ──
-        // three-globe hides its built-in tile engine when using a custom globeMaterial; we add a
-        // second SlippyMap slightly above the surface so day/night shading stays on the base mesh.
-        if (tierAtInit !== 'low') {
-            // Higher max zoom → more place names (towns, etc.), closer to Cesium’s label LOD (z≈18).
-            const labelMaxLevel = tierAtInit === 'medium' ? 8 : 11
-            labelTileLayer = new SlippyMap(GLOBE_RADIUS * 1.004, {
-                tileUrl: CARTO_LABEL_TILE_URL,
-                minLevel: 0,
-                maxLevel: labelMaxLevel,
-            })
-            // Match three-globe’s built-in tile engine (sibling to globe mesh): no extra Y rotation.
-            // globe.gl paths/points share this frame; −π/2 was misaligning label tiles.
-            // Lower degrees per tile segment → smoother tile draping (less “choppy” quads).
-            labelTileLayer.curvatureResolution = 1.75
-            // Hide the library’s protective black inner sphere so transparent label pixels show Earth.
-            if (labelTileLayer.children[0]) labelTileLayer.children[0].visible = false
-            scene.add(labelTileLayer)
-        }
 
         // ── Labels layer (per-marker titles for news — separate from map typography) ──
         globe
@@ -731,6 +570,12 @@ export default function GlobeGLView({ onGlobeReady }) {
         // Signal ready
         const readyTimer = setTimeout(() => {
             if (onGlobeReadyRef.current) onGlobeReadyRef.current()
+            // After globe init, force data sync from current store
+            setTimeout(() => {
+                const { events, newsItems } = useAtlasStore.getState()
+                const visible = getVisibleItems()
+                globe.pointsData(visible)
+            }, 500)
         }, 500)
 
         return () => {
@@ -744,11 +589,6 @@ export default function GlobeGLView({ onGlobeReady }) {
             clearTimeout(readyTimer)
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
             useAtlasStore.getState().setOnResetView(null)
-            if (labelTileLayer) {
-                labelTileLayer.clearTiles?.()
-                scene.remove(labelTileLayer)
-                labelTileLayer = null
-            }
             if (globeRef.current) {
                 globeRef.current._destructor?.()
                 globeRef.current = null
@@ -756,7 +596,7 @@ export default function GlobeGLView({ onGlobeReady }) {
         }
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Sync Auto-Rotate setting when user changes quality tier or toggles the feature
+    // Sync Auto-Rotate setting when user changes quality priority or toggles the feature
     useEffect(() => {
         const globe = globeRef.current
         if (!globe) return
@@ -778,7 +618,7 @@ export default function GlobeGLView({ onGlobeReady }) {
         // Rings: prioritize high-severity events, then news
         const ringItems = visible
             .sort((a, b) => (b.severity || 0) - (a.severity || 0))
-            .slice(0, 80)
+            .slice(0, isMobile ? 15 : 80)
         globe.ringsData(ringItems)
     }, [newsItems, activeCategories, events, dataLayers, getVisibleItems])
 

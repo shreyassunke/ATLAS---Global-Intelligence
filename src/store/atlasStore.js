@@ -104,6 +104,41 @@ function loadOnboarded() {
 // Load persisted quality state
 const savedQuality = loadQualitySettings()
 
+const DEFAULT_DIMENSIONS = ['safety', 'governance', 'economy', 'people', 'environment', 'narrative']
+function loadActiveDimensions() {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('dim')) {
+      return new Set(params.get('dim').split(',').filter(d => DEFAULT_DIMENSIONS.includes(d)))
+    }
+    const legacy = localStorage.getItem('atlas_active_dimensions')
+    if (legacy) {
+      localStorage.removeItem('atlas_active_dimensions')
+      const legacyMap = {
+        'conflict': 'safety', 'cyber': 'narrative', 'natural': 'environment',
+        'humanitarian': 'people', 'economic': 'economy', 'signals': 'narrative', 'hazard': 'environment'
+      }
+      const parsed = JSON.parse(legacy)
+      const migrated = Array.isArray(parsed) ? parsed.map(d => legacyMap[d] || d) : DEFAULT_DIMENSIONS
+      localStorage.setItem('atlas_active_dimensions', JSON.stringify(migrated))
+      return new Set(migrated)
+    }
+    const current = localStorage.getItem('atlas_active_dimensions')
+    if (current) return new Set(JSON.parse(current))
+  } catch { /* ignore */ }
+  return new Set(DEFAULT_DIMENSIONS)
+}
+
+function loadFilters() {
+  const params = new URLSearchParams(window.location.search)
+  return {
+    priority: params.get('pri') || localStorage.getItem('atlas_priority_filter') || 'p1',
+    time: params.get('time') || localStorage.getItem('atlas_time_filter') || 'live'
+  }
+}
+
+const filters = loadFilters()
+
 export const useAtlasStore = create((set, get) => ({
   newsItems: [],
   activeCategories: new Set(CATEGORY_KEYS),
@@ -144,17 +179,16 @@ export const useAtlasStore = create((set, get) => ({
   manualRefreshUsedToday: false,
   triggerManualRefresh: null,
   launchTransitionActive: false,
-  skipCesiumIntro: false,
-
   // ── EventBus / Intel Events ──
   events: [],
   eventMap: {},
-  tierCounts: { latent: 0, active: 0, critical: 0 },
+  priorityCounts: { p1: 0, p2: 0, p3: 0 },
   selectedEvent: null,
   sourceStatuses: {},
   eventBusReady: false,
-  severityFloor: 1,
-  activeDomains: new Set(['conflict', 'cyber', 'natural', 'humanitarian', 'economic', 'signals', 'hazard']),
+  priorityFilter: filters.priority,
+  timeFilter: filters.time,
+  activeDimensions: loadActiveDimensions(),
   focusedEventId: null,
   anomalies: [],
   colorblindMode: localStorage.getItem('atlas_colorblind') === 'true',
@@ -171,15 +205,13 @@ export const useAtlasStore = create((set, get) => ({
 
   // ── UI State ──
   settingsOpen: false,
-  sourcesOpen: false,
-  newsSidebarOpen: false,
 
   // ── Quality & Globe Renderer ──
   /** 'cesium' | 'globegl' | 'leaflet' */
   globeMode: loadGlobeMode(),
   /** 'auto' | 'high' | 'medium' | 'low' */
   qualityTier: savedQuality?.tier || 'auto',
-  /** Resolved tier after auto-detection: 'high' | 'medium' | 'low' */
+  /** Resolved priority after auto-detection: 'high' | 'medium' | 'low' */
   resolvedTier: savedQuality?.resolved || 'high',
   /** Per-setting overrides (user toggled individual settings) */
   qualityOverrides: savedQuality?.overrides || {},
@@ -330,14 +362,14 @@ export const useAtlasStore = create((set, get) => ({
     set({ globeMode: mode })
   },
 
-  setQualityTier: (tier) => {
+  setQualityTier: (priority) => {
     const state = get()
-    const resolved = tier === 'auto' ? state.resolvedTier : tier
-    saveQualitySettings({ tier, resolved, overrides: state.qualityOverrides })
-    set({ qualityTier: tier, resolvedTier: resolved })
+    const resolved = priority === 'auto' ? state.resolvedTier : priority
+    saveQualitySettings({ priority, resolved, overrides: state.qualityOverrides })
+    set({ qualityTier: priority, resolvedTier: resolved })
   },
 
-  setResolvedTier: (resolved) => {
+  setResolvedPriority: (resolved) => {
     const state = get()
     saveQualitySettings({ tier: state.qualityTier, resolved, overrides: state.qualityOverrides })
     set({ resolvedTier: resolved })
@@ -356,16 +388,14 @@ export const useAtlasStore = create((set, get) => ({
     set({ qualityOverrides: {} })
   },
 
-  setSourcesOpen: (v) => set({ sourcesOpen: typeof v === 'function' ? v(get().sourcesOpen) : v }),
-  setNewsSidebarOpen: (v) => set({ newsSidebarOpen: typeof v === 'function' ? v(get().newsSidebarOpen) : v }),
   toggleSettings: () => set((s) => ({ settingsOpen: !s.settingsOpen })),
   setSettingsOpen: (v) => set({ settingsOpen: v }),
 
   getEffectiveSetting: (key) => {
     const state = get()
     if (key in state.qualityOverrides) return state.qualityOverrides[key]
-    const tier = QUALITY_TIERS[state.resolvedTier] || QUALITY_TIERS.high
-    return typeof tier[key] === 'function' ? tier[key]() : tier[key]
+    const priority = QUALITY_TIERS[state.resolvedTier] || QUALITY_TIERS.high
+    return typeof priority[key] === 'function' ? priority[key]() : priority[key]
   },
 
   // ── EventBus Actions ──
@@ -413,23 +443,25 @@ export const useAtlasStore = create((set, get) => ({
           const removeSet = new Set(diff.removed)
           const filtered = nextEvents.filter(e => !removeSet.has(e.id))
 
-          const counts = { latent: 0, active: 0, critical: 0 }
+          const counts = { p3: 0, p2: 0, p1: 0 }
           for (const e of filtered) {
-            if (counts[e.tier] !== undefined) counts[e.tier]++
+            const pri = e.priority || e.priority || 'p3'
+            if (counts[pri] !== undefined) counts[pri]++
           }
-          return { events: filtered, eventMap: nextMap, tierCounts: counts }
+          return { events: filtered, eventMap: nextMap, priorityCounts: counts }
         }
 
-        const counts = { latent: 0, active: 0, critical: 0 }
+        const counts = { p3: 0, p2: 0, p1: 0 }
         for (const e of nextEvents) {
-          if (counts[e.tier] !== undefined) counts[e.tier]++
+          const pri = e.priority || e.priority || 'p3'
+          if (counts[pri] !== undefined) counts[pri]++
         }
 
         const anomalyUpdates = diff.anomalies?.length > 0
           ? { anomalies: [...s.anomalies, ...diff.anomalies].slice(-100) }
           : {}
 
-        return { events: nextEvents, eventMap: nextMap, tierCounts: counts, ...anomalyUpdates }
+        return { events: nextEvents, eventMap: nextMap, priorityCounts: counts, ...anomalyUpdates }
       })
     })
 
@@ -452,24 +484,28 @@ export const useAtlasStore = create((set, get) => ({
       eventBusReady: false,
       events: [],
       eventMap: {},
-      tierCounts: { latent: 0, active: 0, critical: 0 },
+      priorityCounts: { p1: 0, p2: 0, p3: 0 },
       sourceStatuses: {},
     })
   },
 
   setSelectedEvent: (event) => set({ selectedEvent: event }),
-  setSeverityFloor: (v) => {
-    localStorage.setItem('atlas_severity_floor', String(v))
-    set({ severityFloor: v })
+  setPriorityFilter: (v) => {
+    localStorage.setItem('atlas_priority_filter', v)
+    set({ priorityFilter: v })
+  },
+  setTimeFilter: (v) => {
+    localStorage.setItem('atlas_time_filter', v)
+    set({ timeFilter: v })
   },
   setFocusedEventId: (id) => set({ focusedEventId: id }),
   clearFocus: () => set({ focusedEventId: null }),
 
-  toggleDomain: (domain) => set((s) => {
-    const next = new Set(s.activeDomains)
-    if (next.has(domain)) next.delete(domain)
-    else next.add(domain)
-    return { activeDomains: next }
+  toggleDimension: (dimension) => set((s) => {
+    const next = new Set(s.activeDimensions)
+    if (next.has(dimension)) next.delete(dimension)
+    else next.add(dimension)
+    return { activeDimensions: next }
   }),
 
   toggleColorblindMode: () => set((s) => {

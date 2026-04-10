@@ -58,7 +58,8 @@ export function clusterEvents(events, radiusKm = 200, minClusterSize = 5) {
 
     for (const other of sorted) {
       if (assigned.has(other.id)) continue
-      if (other.tier !== evt.tier) continue
+      // Cluster by dimension (not priority/tier)
+      if (other.dimension !== evt.dimension) continue
       const dist = haversineKm(evt.lat, evt.lng, other.lat, other.lng)
       if (dist <= radiusKm) {
         cluster.push(other)
@@ -82,7 +83,8 @@ export function clusterEvents(events, radiusKm = 200, minClusterSize = 5) {
       clusters.push({
         centroid: { lat: sumLat / cluster.length, lng: sumLng / cluster.length },
         bounds: { minLat, maxLat, minLng, maxLng },
-        tier: evt.tier,
+        dimension: evt.dimension,
+        priority: evt.priority,
         count: cluster.length,
         maxSeverity: Math.max(...cluster.map(e => e.severity)),
         events: cluster,
@@ -114,7 +116,7 @@ export function buildCorrelationArcs(anomalies, eventMap) {
           type: ARC_TYPES.CORRELATION,
           from: { lat: e1.lat, lng: e1.lng },
           to: { lat: e2.lat, lng: e2.lng },
-          tier: 'critical',
+          priority: 'p1',
           label: `Chokepoint: ${anomaly.chokepoint}`,
         })
       }

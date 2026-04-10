@@ -51,7 +51,7 @@ export const REGION_LABELS = {
   tech: 'Technology',
   latam: 'Latin America',
   other: 'Other',
-  custom: 'Custom Domains',
+  custom: 'Custom Dimensions',
 }
 
 export const REGION_ORDER = ['wire', 'us', 'europe', 'asia', 'africa', 'business', 'tech', 'latam', 'other', 'custom']
@@ -223,7 +223,7 @@ export async function searchSourcesByLocation(query, catalog) {
 }
 
 export function getSourceMeta(selectedSource, catalog) {
-  if (selectedSource.type === 'domain') {
+  if (selectedSource.type === 'dimension') {
     return { region: 'custom', country: '—', name: selectedSource.name }
   }
   const found = catalog.find((s) => s.id === selectedSource.id)

@@ -11,8 +11,8 @@ function pickPreferences(state) {
     quality_tier: state.qualityTier,
     quality_overrides: state.qualityOverrides,
     colorblind_mode: state.colorblindMode,
-    severity_floor: state.severityFloor,
-    active_domains: [...state.activeDomains],
+    priority_filter: state.priorityFilter,
+    active_dimensions: [...state.activeDimensions],
   }
 }
 
@@ -47,15 +47,15 @@ export function usePreferencesSync() {
       if (typeof data.colorblind_mode === 'boolean' && data.colorblind_mode !== store.colorblindMode) {
         store.toggleColorblindMode()
       }
-      if (typeof data.severity_floor === 'number') store.setSeverityFloor(data.severity_floor)
-      if (Array.isArray(data.active_domains)) {
-        const currentDomains = store.activeDomains
-        const remoteDomains = new Set(data.active_domains)
-        for (const d of currentDomains) {
-          if (!remoteDomains.has(d)) store.toggleDomain(d)
+      if (data.priority_filter) store.setPriorityFilter(data.priority_filter)
+      if (Array.isArray(data.active_dimensions)) {
+        const currentDimensions = store.activeDimensions
+        const remoteDimensions = new Set(data.active_dimensions)
+        for (const d of currentDimensions) {
+          if (!remoteDimensions.has(d)) store.toggleDimension(d)
         }
-        for (const d of remoteDomains) {
-          if (!currentDomains.has(d)) store.toggleDomain(d)
+        for (const d of remoteDimensions) {
+          if (!currentDimensions.has(d)) store.toggleDimension(d)
         }
       }
 

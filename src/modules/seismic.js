@@ -1,11 +1,11 @@
-import { TIERS, DOMAINS, createEvent, createEventId } from '../core/eventSchema.js'
+import { PRIORITIES, DIMENSIONS, createEvent, createEventId } from '../core/eventSchema.js'
 
-function magnitudeToTierAndSeverity(mag) {
-  if (mag >= 7.0) return { tier: TIERS.CRITICAL, severity: 5 }
-  if (mag >= 6.0) return { tier: TIERS.CRITICAL, severity: 4 }
-  if (mag >= 5.5) return { tier: TIERS.ACTIVE, severity: 3 }
-  if (mag >= 5.0) return { tier: TIERS.ACTIVE, severity: 2 }
-  return { tier: TIERS.LATENT, severity: 1 }
+function magnitudeToPriorityAndSeverity(mag) {
+  if (mag >= 7.0) return { priority: PRIORITIES.P1, severity: 5 }
+  if (mag >= 6.0) return { priority: PRIORITIES.P1, severity: 4 }
+  if (mag >= 5.5) return { priority: PRIORITIES.P2, severity: 3 }
+  if (mag >= 5.0) return { priority: PRIORITIES.P2, severity: 2 }
+  return { priority: PRIORITIES.P3, severity: 1 }
 }
 
 export function normalizeUSGS(geojson) {
@@ -17,13 +17,13 @@ export function normalizeUSGS(geojson) {
       const props = f.properties
       const [lng, lat] = f.geometry.coordinates
       const mag = props.mag
-      const { tier, severity } = magnitudeToTierAndSeverity(mag)
+      const { priority, severity } = magnitudeToPriorityAndSeverity(mag)
       const timestamp = new Date(props.time).toISOString()
 
       return createEvent({
         id: createEventId(lat, lng, props.time, 'usgs', props.title || ''),
-        tier,
-        domain: DOMAINS.NATURAL,
+        priority,
+        dimension: DIMENSIONS.ENVIRONMENT,
         lat,
         lng,
         latApproximate: false,
@@ -72,18 +72,18 @@ export function normalizeGDACS(xmlText) {
 
       const alertMatch = item.match(/<gdacs:alertlevel>([^<]+)/)
       const alertLevel = alertMatch ? alertMatch[1].trim().toLowerCase() : ''
-      let tier = TIERS.LATENT
+      let priority = PRIORITIES.P3
       let severity = 2
-      if (alertLevel === 'red') { tier = TIERS.CRITICAL; severity = 5 }
-      else if (alertLevel === 'orange') { tier = TIERS.ACTIVE; severity = 3 }
-      else if (alertLevel === 'green') { tier = TIERS.LATENT; severity = 1 }
+      if (alertLevel === 'red') { priority = PRIORITIES.P1; severity = 5 }
+      else if (alertLevel === 'orange') { priority = PRIORITIES.P2; severity = 3 }
+      else if (alertLevel === 'green') { priority = PRIORITIES.P3; severity = 1 }
 
       const timestamp = pubDate ? new Date(pubDate).toISOString() : new Date().toISOString()
 
       events.push(createEvent({
         id: createEventId(lat, lng, Date.parse(timestamp), 'gdacs', title),
-        tier,
-        domain: DOMAINS.NATURAL,
+        priority,
+        dimension: DIMENSIONS.ENVIRONMENT,
         lat,
         lng,
         latApproximate: false,

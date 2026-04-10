@@ -49,16 +49,16 @@ export function parseFirmsCSV(csvText) {
     const acqTime = cols[timeIdx] || ''
 
     // Classify severity based on Fire Radiative Power (FRP) in megawatts
-    let tier = 'latent'
+    let priority = 'p3'
     let severity = 1
     if (frp > 500 || confidence === 'high') {
-      tier = 'critical'
+      priority = 'p1'
       severity = 5
     } else if (frp > 100) {
-      tier = 'active'
+      priority = 'p2'
       severity = 3
     } else if (frp > 30) {
-      tier = 'active'
+      priority = 'p2'
       severity = 2
     }
 
@@ -70,9 +70,9 @@ export function parseFirmsCSV(csvText) {
       brightness,
       acqDate,
       acqTime,
-      tier,
+      priority,
       severity,
-      domain: 'natural',
+      dimension: 'environment',
       title: `Active Fire — FRP ${Math.round(frp)} MW`,
       detail: `Confidence: ${confidence}. Fire radiative power: ${frp.toFixed(1)} MW. Brightness: ${brightness.toFixed(1)}K.`,
       source: 'NASA FIRMS',

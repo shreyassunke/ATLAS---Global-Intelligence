@@ -25,7 +25,7 @@ function fetchWithTimeout(url) {
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer))
 }
 
-export async function fetchNewsApi(apiKey, { standardSources = [], domains = [], pages = 1 } = {}) {
+export async function fetchNewsApi(apiKey, { standardSources = [], dimensions = [], pages = 1 } = {}) {
   const articles = []
   const fetches = []
 
@@ -42,11 +42,11 @@ export async function fetchNewsApi(apiKey, { standardSources = [], domains = [],
     }
   }
 
-  if (domains.length > 0) {
+  if (dimensions.length > 0) {
     for (let page = 1; page <= pages; page += 1) {
       fetches.push(
         fetchWithTimeout(
-          `https://newsapi.org/v2/everything?domains=${domains.join(',')}&sortBy=publishedAt&pageSize=100&page=${page}&apiKey=${apiKey}`,
+          `https://newsapi.org/v2/everything?dimensions=${dimensions.join(',')}&sortBy=publishedAt&pageSize=100&page=${page}&apiKey=${apiKey}`,
         ),
       )
     }

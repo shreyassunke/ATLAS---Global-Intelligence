@@ -187,3 +187,68 @@ export const CATEGORY_KEYS = Object.keys(CATEGORIES)
 export function getCategoryColor(category) {
   return CATEGORIES[category]?.color ?? '#FFFFFF'
 }
+
+// ── Legacy category → Dimension mapping ──
+// Maps the 30+ news taxonomy to the 6 civilian dimensions.
+// This supports news items during transition while GDELT becomes primary.
+import { DIMENSION_COLORS } from '../core/eventSchema'
+export { DIMENSION_COLORS }
+
+const CATEGORY_TO_DIMENSION = {
+  // → SAFETY
+  war_conflict: 'safety',
+  crime_justice: 'safety',
+
+  // → GOVERNANCE
+  politics_government: 'governance',
+  local_politics: 'governance',
+
+  // → ECONOMY
+  business_economy: 'economy',
+  finance_markets: 'economy',
+  real_estate: 'economy',
+  energy: 'economy',
+  labor_workforce: 'economy',
+  automotive: 'economy',
+  agriculture: 'economy',
+
+  // → PEOPLE
+  health_medicine: 'people',
+  education: 'people',
+  human_interest: 'people',
+  immigration: 'people',
+  religion_faith: 'people',
+  community_events: 'people',
+  obituaries: 'people',
+
+  // → ENVIRONMENT
+  environment_climate: 'environment',
+  weather: 'environment',
+  space_astronomy: 'environment',
+
+  // → NARRATIVE
+  science_technology: 'narrative',
+  world_international: 'narrative',
+  entertainment_celebrity: 'narrative',
+  sports: 'narrative',
+  lifestyle_culture: 'narrative',
+  food_travel: 'narrative',
+  fashion_beauty: 'narrative',
+  arts_music: 'narrative',
+  editorials: 'narrative',
+  op_eds: 'narrative',
+  fact_checks: 'narrative',
+  investigations: 'narrative',
+  traffic_transportation: 'narrative',
+}
+
+/**
+ * Map a legacy news category to a civilian dimension.
+ * Falls back to 'narrative' for unknown categories.
+ * @param {string} category — legacy category key
+ * @returns {string} dimension key
+ */
+export function legacyCategoryToDimension(category) {
+  return CATEGORY_TO_DIMENSION[category] || 'narrative'
+}
+

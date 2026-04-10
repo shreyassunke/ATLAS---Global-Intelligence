@@ -25,13 +25,15 @@ export default function NewsCard() {
               : 'right-4 top-1/2 -translate-y-1/2 w-80'
           }`}
         >
-          <div className="glass rounded-xl p-5 space-y-3">
+          <div className="bg-[#0a0f1a]/95 backdrop-blur-xl border border-slate-800 shadow-2xl rounded-xl p-5 space-y-4">
             {/* Close button */}
             <button
               onClick={() => setSelectedMarker(null)}
-              className="absolute top-3 right-3 text-[var(--text-muted)] hover:text-white text-sm cursor-pointer"
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors cursor-pointer"
             >
-              x
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
 
             {/* Video thumbnail — click opens in-app embed (same pattern as Street View overlay) */}
@@ -77,42 +79,39 @@ export default function NewsCard() {
             {/* Category badge */}
             <div className="flex items-center gap-2">
               <div
-                className="w-2 h-2 rounded-full"
-                style={{ backgroundColor: CATEGORIES[selectedMarker.category]?.color || '#fff' }}
+                className="w-2 h-2 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.5)]"
+                style={{ backgroundColor: CATEGORIES[selectedMarker.category]?.color || '#3b82f6', boxShadow: `0 0 8px ${CATEGORIES[selectedMarker.category]?.color || '#3b82f6'}` }}
               />
-              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)]">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-slate-300">
                 {CATEGORIES[selectedMarker.category]?.label || selectedMarker.category}
               </span>
               {selectedMarker.mediaType === 'video' && !selectedMarker.thumbnailUrl && (
-                <span className="text-[9px] uppercase tracking-wider text-red-400 border border-red-400/30 rounded px-1.5 py-0.5 leading-none">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded px-1.5 py-0.5 leading-none">
                   {selectedMarker.isLive ? 'LIVE' : 'VIDEO'}
                 </span>
               )}
-              <span className="text-[10px] uppercase tracking-[0.15em] text-[var(--text-muted)] ml-auto">
-                {CATEGORIES[selectedMarker.category]?.icon}
-              </span>
             </div>
 
             {/* Title */}
-            <h3 className="text-base font-semibold leading-snug text-white">
+            <h3 className="text-lg font-bold leading-tight text-white pr-4">
               {selectedMarker.title}
             </h3>
 
             {/* Source + Time */}
-            <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] font-mono">
+            <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
               {selectedMarker.url && !selectedMarker.url.startsWith('#') ? (
                 <a
                   href={selectedMarker.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-[var(--accent)] hover:underline cursor-pointer"
+                  className="text-cyan-400 hover:text-cyan-300 hover:underline transition-colors cursor-pointer"
                 >
                   {selectedMarker.source}
                 </a>
               ) : (
-                <span className="text-[var(--accent)]">{selectedMarker.source}</span>
+                <span className="text-cyan-400">{selectedMarker.source}</span>
               )}
-              <span>|</span>
+              <span className="opacity-50">•</span>
               <span>
                 {new Date(selectedMarker.publishedAt).toLocaleTimeString([], {
                   hour: '2-digit',
@@ -123,23 +122,27 @@ export default function NewsCard() {
 
             {/* Description */}
             {selectedMarker.description && (
-              <p className="text-xs text-[var(--text-muted)] leading-relaxed line-clamp-3">
+              <p className="text-sm text-slate-300 leading-relaxed line-clamp-3">
                 {selectedMarker.description}
               </p>
             )}
 
-            {/* Coordinates — only when plottable */}
+            {/* Coordinates */}
             {selectedMarker.lat != null && selectedMarker.lng != null && (
-              <div className="text-[10px] text-[var(--text-muted)] font-mono opacity-50">
-                {Math.abs(selectedMarker.lat).toFixed(2)}{selectedMarker.lat >= 0 ? 'N' : 'S'},{' '}
-                {Math.abs(selectedMarker.lng).toFixed(2)}{selectedMarker.lng >= 0 ? 'E' : 'W'}
+              <div className="text-[11px] text-slate-500 font-mono flex items-center gap-2">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                {Math.abs(selectedMarker.lat).toFixed(3)}° {selectedMarker.lat >= 0 ? 'N' : 'S'},{' '}
+                {Math.abs(selectedMarker.lng).toFixed(3)}° {selectedMarker.lng >= 0 ? 'E' : 'W'}
               </div>
             )}
 
             {/* Street View + source link row */}
             {(selectedMarker.lat != null && selectedMarker.lng != null) ||
               (selectedMarker.url && !selectedMarker.url.startsWith('#')) ? (
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-4 flex items-center gap-3 pt-2">
                 {selectedMarker.lat != null && selectedMarker.lng != null && (
                   <button
                     type="button"
@@ -151,9 +154,9 @@ export default function NewsCard() {
                         meta: selectedMarker,
                       })
                     }
-                    className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] text-[var(--text-muted)] hover:bg-white/10 hover:text-white cursor-pointer"
+                    className="flex-1 flex justify-center items-center gap-2 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-300 hover:text-white transition-colors cursor-pointer"
                   >
-                    <span>Street View</span>
+                    Street View
                   </button>
                 )}
 
@@ -173,9 +176,9 @@ export default function NewsCard() {
                         isLive: !!selectedMarker.isLive,
                       })
                     }}
-                    className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] text-white/90 hover:bg-white/10 cursor-pointer"
+                    className="flex-1 flex justify-center items-center gap-2 rounded bg-cyan-900/40 hover:bg-cyan-800/60 border border-cyan-800/50 px-4 py-2 text-xs font-bold uppercase tracking-widest text-cyan-400 transition-colors cursor-pointer"
                   >
-                    Play inline
+                    Play Video
                   </button>
                 )}
 
@@ -184,25 +187,25 @@ export default function NewsCard() {
                     href={selectedMarker.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/0 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.16em] text-[var(--accent)] hover:bg-white/5 cursor-pointer"
+                    className="flex-1 flex justify-center items-center gap-2 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-300 hover:text-white transition-colors cursor-pointer"
                   >
-                    <span>Source</span>
+                    Source Link
                   </a>
                 )}
               </div>
             ) : null}
 
             {/* Importance indicator */}
-            <div className="flex gap-1 pt-1">
+            <div className="flex gap-1.5 pt-2">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div
                   key={i}
-                  className="h-1 flex-1 rounded-full"
+                  className="h-1 flex-1 rounded-full shadow-sm"
                   style={{
                     backgroundColor:
                       i < selectedMarker.importance
-                        ? CATEGORIES[selectedMarker.category]?.color || '#fff'
-                        : 'rgba(255,255,255,0.08)',
+                        ? CATEGORIES[selectedMarker.category]?.color || '#3b82f6'
+                        : '#1e293b',
                   }}
                 />
               ))}

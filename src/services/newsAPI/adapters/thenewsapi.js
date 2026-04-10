@@ -27,7 +27,7 @@ function uniq(arr) {
 function getCountriesFromSources(selectedSources, catalog) {
   const countries = new Set()
   for (const s of selectedSources) {
-    if (s.type === 'domain') continue
+    if (s.type === 'dimension') continue
     const meta = catalog?.find((c) => c.id === s.id)
     const cc = (meta?.country || '').toLowerCase()
     if (cc && THENEWSAPI_COUNTRIES.includes(cc)) countries.add(cc)

@@ -14,12 +14,12 @@ import { fetchTheNewsApi } from './adapters/thenewsapi'
 
 function splitSourcesByType(selectedSources) {
   const standard = []
-  const domains = []
+  const dimensions = []
   for (const s of selectedSources) {
-    if (s.type === 'domain') domains.push(s.id)
+    if (s.type === 'dimension') dimensions.push(s.id)
     else standard.push(s.id)
   }
-  return { standard, domains }
+  return { standard, dimensions }
 }
 
 function loadUsage() {
@@ -75,7 +75,7 @@ function dedupeByUrl(articles) {
 
 /** Map provider id → fetch function call */
 function createProviderFetcher(provider, options) {
-  const { standard, domains, targetArticles, newsApiPages, broaden } = options
+  const { standard, dimensions, targetArticles, newsApiPages, broaden } = options
   const keys = provider.getKeys()
   if (keys.length === 0) return null
 
@@ -84,7 +84,7 @@ function createProviderFetcher(provider, options) {
       let result
       try {
         if (provider.id === 'newsapi') {
-          result = await fetchNewsApi(key, { standardSources: standard, domains, pages: newsApiPages })
+          result = await fetchNewsApi(key, { standardSources: standard, dimensions, pages: newsApiPages })
         } else if (provider.id === 'gnews') {
           result = await fetchGNews(key, {
             selectedSources: options.selectedSources,
@@ -129,9 +129,9 @@ export async function fetchFromProviders({
 } = {}) {
   const providers = getAvailableProviders()
   const exhaustedProviders = []
-  const { standard, domains } = splitSourcesByType(selectedSources || [])
+  const { standard, dimensions } = splitSourcesByType(selectedSources || [])
 
-  const options = { standard, domains, selectedSources, catalog, targetArticles, newsApiPages, broaden }
+  const options = { standard, dimensions, selectedSources, catalog, targetArticles, newsApiPages, broaden }
 
   // Build parallel fetch tasks for all available providers
   const tasks = []

@@ -2,7 +2,8 @@
  * GDELT 2.0 Event Database — 15-minute CSV Ingestion Service
  *
  * Fetches the latest GDELT Event CSV export (tab-delimited), parses it,
- * and produces unified ATLAS globe events filtered by relevant CAMEO codes.
+ * and produces unified ATLAS globe events classified by the 6-dimension
+ * civilian taxonomy.
  *
  * CAMEO Event Codes & QuadClass Mapping:
  *   QuadClass 1 → Verbal Cooperation  (diplomacy)
@@ -14,6 +15,8 @@
  * Attribution: "Data provided by the GDELT Project (https://www.gdeltproject.org)"
  */
 
+import { DIMENSIONS, cameoToDimension } from '../core/eventSchema.js'
+
 // ── CAMEO root codes we care about ──
 // 14 = Protest, 17 = Coerce, 18 = Assault, 19 = Fight, 20 = Use Unconventional Mass Violence
 // 13 = Threaten, 12 = Reject, 10 = Demand
@@ -23,41 +26,14 @@ const THREAT_CODES = new Set(['13', '12', '10'])
 const DIPLOMACY_CODES = new Set(['04', '05', '06'])
 
 /**
- * Map GDELT QuadClass (1-4) to an ATLAS domain + tier
+ * Map GDELT QuadClass (1-4) to an ATLAS dimension + severity
+ * Uses the civilian taxonomy: SAFETY, GOVERNANCE, ECONOMY, PEOPLE, ENVIRONMENT, NARRATIVE
  */
 function classifyEvent(quadClass, cameoRoot, goldstein) {
   const qc = parseInt(quadClass)
   const gs = parseFloat(goldstein) || 0
 
-  if (qc === 4 || CONFLICT_CODES.has(cameoRoot)) {
-    // Material conflict — war, assault, mass violence
-    return {
-      domain: 'conflict',
-      tier: gs <= -7 ? 'critical' : gs <= -4 ? 'active' : 'active',
-      severity: gs <= -8 ? 5 : gs <= -6 ? 4 : gs <= -3 ? 3 : 2,
-    }
-  }
-
-  if (qc === 3 || THREAT_CODES.has(cameoRoot)) {
-    // Verbal conflict — threats, demands
-    return {
-      domain: 'conflict',
-      tier: gs <= -5 ? 'active' : 'latent',
-      severity: gs <= -5 ? 3 : gs <= -2 ? 2 : 1,
-    }
-  }
-
-  if (qc === 1 || qc === 2 || DIPLOMACY_CODES.has(cameoRoot)) {
-    // Cooperation & diplomacy
-    return {
-      domain: 'signals',
-      tier: gs >= 7 ? 'active' : 'latent',
-      severity: gs >= 7 ? 2 : 1,
-    }
-  }
-
-  // Fallback — neutral events
-  return { domain: 'signals', tier: 'latent', severity: 1 }
+  return cameoToDimension(cameoRoot, qc, gs)
 }
 
 /**
@@ -101,6 +77,7 @@ function parseGdeltRow(columns) {
   const cameoRoot = columns[COL.EventRootCode] || ''
   const quadClass = columns[COL.QuadClass] || ''
   const goldstein = columns[COL.GoldsteinScale] || '0'
+  const avgTone = parseFloat(columns[COL.AvgTone]) || 0
   const numMentions = parseInt(columns[COL.NumMentions]) || 0
   const numSources = parseInt(columns[COL.NumSources]) || 0
 
@@ -137,13 +114,17 @@ function parseGdeltRow(columns) {
     title: title.substring(0, 120),
     detail: `Location: ${location}. Goldstein: ${goldstein}. Sources: ${numSources}. CAMEO: ${cameoCode}.`,
     sourceUrl,
-    ...classification,
+    dimension: classification.dimension,
+    severity: classification.severity,
     corroborationCount: corrobCount,
     numMentions,
     numSources,
     cameoRoot,
     quadClass: parseInt(quadClass),
     goldstein: parseFloat(goldstein),
+    toneScore: avgTone,
+    actor1,
+    actor2,
     sqlDate,
     locationName: location,
     layer: 'gdelt',
@@ -217,14 +198,16 @@ export async function fetchGdeltEvents() {
       lat: 0,
       lng: 0,
       title: article.title || 'GDELT Event',
-      detail: `Source: ${article.domain || 'unknown'}`,
+      detail: `Source: ${article.dimension || 'unknown'}`,
       sourceUrl: article.url || '',
-      domain: 'signals',
-      tier: 'latent',
+      dimension: DIMENSIONS.NARRATIVE,
       severity: 1,
       corroborationCount: 1,
       numMentions: 1,
       numSources: 1,
+      toneScore: parseFloat(article.tone) || 0,
+      actor1: '',
+      actor2: '',
       cameoRoot: '',
       quadClass: 0,
       goldstein: 0,

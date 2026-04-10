@@ -1,4 +1,4 @@
-import { DOMAINS } from './eventSchema.js'
+import { DIMENSIONS } from './eventSchema.js'
 
 export const MODULES = {
   SEISMIC: 'seismic',
@@ -21,26 +21,26 @@ export const MODULES = {
 }
 
 export const SOURCE_CATALOG = {
-  usgs: { name: 'USGS Earthquakes', module: MODULES.SEISMIC, domain: DOMAINS.NATURAL, authoritative: true, requiresKey: false, pollInterval: 120_000 },
-  gdacs: { name: 'GDACS Disasters', module: MODULES.SEISMIC, domain: DOMAINS.NATURAL, authoritative: true, requiresKey: false, pollInterval: 300_000 },
-  eonet: { name: 'NASA EONET', module: MODULES.WEATHER, domain: DOMAINS.NATURAL, authoritative: true, requiresKey: false, pollInterval: 600_000 },
-  'open-meteo': { name: 'Open-Meteo', module: MODULES.WEATHER, domain: DOMAINS.NATURAL, authoritative: false, requiresKey: false, pollInterval: 600_000 },
-  'noaa-kp': { name: 'NOAA Kp Index', module: MODULES.SPACE, domain: DOMAINS.SIGNALS, authoritative: true, requiresKey: false, pollInterval: 300_000 },
-  'noaa-xray': { name: 'NOAA X-Ray Flux', module: MODULES.SPACE, domain: DOMAINS.SIGNALS, authoritative: true, requiresKey: false, pollInterval: 300_000 },
-  'noaa-solar-wind': { name: 'NOAA Solar Wind', module: MODULES.SPACE, domain: DOMAINS.SIGNALS, authoritative: true, requiresKey: false, pollInterval: 300_000 },
-  gdelt: { name: 'GDELT', module: MODULES.NEWS, domain: DOMAINS.SIGNALS, authoritative: false, requiresKey: false, pollInterval: 300_000 },
-  'gdelt-events': { name: 'GDELT Events', module: MODULES.CONFLICT, domain: DOMAINS.CONFLICT, authoritative: false, requiresKey: false, pollInterval: 900_000 },
-  firms: { name: 'NASA FIRMS', module: MODULES.ENVIRONMENT, domain: DOMAINS.NATURAL, authoritative: true, requiresKey: true, pollInterval: 600_000 },
-  ucdp: { name: 'UCDP Conflict', module: MODULES.CONFLICT, domain: DOMAINS.CONFLICT, authoritative: false, requiresKey: false, pollInterval: 600_000 },
-  coingecko: { name: 'CoinGecko', module: MODULES.FINANCIAL, domain: DOMAINS.ECONOMIC, authoritative: false, requiresKey: false, pollInterval: 300_000 },
-  'alt-fng': { name: 'Fear & Greed Index', module: MODULES.PREDICTION, domain: DOMAINS.ECONOMIC, authoritative: false, requiresKey: false, pollInterval: 900_000 },
-  'cisa-kev': { name: 'CISA KEV', module: MODULES.CYBER, domain: DOMAINS.CYBER, authoritative: true, requiresKey: false, pollInterval: 300_000 },
-  reliefweb: { name: 'ReliefWeb', module: MODULES.HUMANITARIAN, domain: DOMAINS.HUMANITARIAN, authoritative: false, requiresKey: false, pollInterval: 1_800_000 },
-  'who-don': { name: 'WHO News', module: MODULES.DISEASE, domain: DOMAINS.HUMANITARIAN, authoritative: true, requiresKey: false, pollInterval: 900_000 },
-  promed: { name: 'ProMED', module: MODULES.DISEASE, domain: DOMAINS.HUMANITARIAN, authoritative: false, requiresKey: false, pollInterval: 900_000 },
-  'ofac-sdn': { name: 'OFAC SDN', module: MODULES.DIPLOMATIC, domain: DOMAINS.SIGNALS, authoritative: true, requiresKey: false, pollInterval: 86_400_000 },
-  'loc-legal': { name: 'Global Legal Monitor', module: MODULES.DIPLOMATIC, domain: DOMAINS.SIGNALS, authoritative: false, requiresKey: false, pollInterval: 3_600_000 },
-  celestrak: { name: 'Celestrak SOCRATES', module: MODULES.SPACE, domain: DOMAINS.SIGNALS, authoritative: false, requiresKey: false, pollInterval: 3_600_000 },
+  usgs:             { name: 'USGS Earthquakes',     module: MODULES.SEISMIC,       dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 120_000 },
+  gdacs:            { name: 'GDACS Disasters',       module: MODULES.SEISMIC,       dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 300_000 },
+  eonet:            { name: 'NASA EONET',            module: MODULES.WEATHER,       dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 600_000 },
+  'open-meteo':     { name: 'Open-Meteo',            module: MODULES.WEATHER,       dimension: DIMENSIONS.ENVIRONMENT,  authoritative: false, requiresKey: false,  pollInterval: 600_000 },
+  'noaa-kp':        { name: 'NOAA Kp Index',         module: MODULES.SPACE,         dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 300_000 },
+  'noaa-xray':      { name: 'NOAA X-Ray Flux',       module: MODULES.SPACE,         dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 300_000 },
+  'noaa-solar-wind': { name: 'NOAA Solar Wind',      module: MODULES.SPACE,         dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 300_000 },
+  gdelt:            { name: 'GDELT',                  module: MODULES.NEWS,          dimension: DIMENSIONS.NARRATIVE,    authoritative: false, requiresKey: false,  pollInterval: 300_000 },
+  'gdelt-events':   { name: 'GDELT Events',          module: MODULES.CONFLICT,      dimension: DIMENSIONS.SAFETY,       authoritative: false, requiresKey: false,  pollInterval: 900_000 },
+  firms:            { name: 'NASA FIRMS',             module: MODULES.ENVIRONMENT,   dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: true,   pollInterval: 600_000 },
+  ucdp:             { name: 'UCDP Conflict',          module: MODULES.CONFLICT,      dimension: DIMENSIONS.SAFETY,       authoritative: false, requiresKey: false,  pollInterval: 600_000 },
+  coingecko:        { name: 'CoinGecko',              module: MODULES.FINANCIAL,     dimension: DIMENSIONS.ECONOMY,      authoritative: false, requiresKey: false,  pollInterval: 300_000 },
+  'alt-fng':        { name: 'Fear & Greed Index',     module: MODULES.PREDICTION,    dimension: DIMENSIONS.ECONOMY,      authoritative: false, requiresKey: false,  pollInterval: 900_000 },
+  'cisa-kev':       { name: 'CISA KEV',               module: MODULES.CYBER,         dimension: DIMENSIONS.SAFETY,       authoritative: true,  requiresKey: false,  pollInterval: 300_000 },
+  reliefweb:        { name: 'ReliefWeb',               module: MODULES.HUMANITARIAN,  dimension: DIMENSIONS.PEOPLE,       authoritative: false, requiresKey: false,  pollInterval: 1_800_000 },
+  'who-don':        { name: 'WHO News',                module: MODULES.DISEASE,       dimension: DIMENSIONS.PEOPLE,       authoritative: true,  requiresKey: false,  pollInterval: 900_000 },
+  promed:           { name: 'ProMED',                  module: MODULES.DISEASE,       dimension: DIMENSIONS.PEOPLE,       authoritative: false, requiresKey: false,  pollInterval: 900_000 },
+  'ofac-sdn':       { name: 'OFAC SDN',               module: MODULES.DIPLOMATIC,    dimension: DIMENSIONS.GOVERNANCE,   authoritative: true,  requiresKey: false,  pollInterval: 86_400_000 },
+  'loc-legal':      { name: 'Global Legal Monitor',   module: MODULES.DIPLOMATIC,    dimension: DIMENSIONS.GOVERNANCE,   authoritative: false, requiresKey: false,  pollInterval: 3_600_000 },
+  celestrak:        { name: 'Celestrak SOCRATES',      module: MODULES.SPACE,         dimension: DIMENSIONS.ENVIRONMENT,  authoritative: false, requiresKey: false,  pollInterval: 3_600_000 },
 }
 
 export function getSourceInfo(sourceId) {
