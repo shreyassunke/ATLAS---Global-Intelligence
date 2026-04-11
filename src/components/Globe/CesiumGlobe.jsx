@@ -2,6 +2,7 @@ import { useEffect, useRef, useMemo } from 'react'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 
+import { initNightShader } from '../../lib/atlas-night-shader'
 import { useAtlasStore } from '../../store/atlasStore'
 import { requestSnapshot } from '../../core/eventBus'
 import { CATEGORIES, getCategoryColor } from '../../utils/categoryColors'
@@ -393,8 +394,10 @@ export default function CesiumGlobe({ onGlobeReady }) {
       viewer.clock.currentTime = Cesium.JulianDate.now()
       viewer.clock.shouldAnimate = true
 
-      // --- Remove all default imagery — Google 3D Tiles ARE the surface ---
-      viewer.imageryLayers.removeAll()
+      // --- Default imagery is kept as the daytime base layer ---
+      // (Google 3D Tiles will overlap if active, but we need the base layer for fallback and night shaders)
+
+      const nightShader = initNightShader(viewer)
 
       // --- No terrain — Google 3D Tiles provide their own mesh surface ---
 
@@ -406,9 +409,9 @@ export default function CesiumGlobe({ onGlobeReady }) {
       const { scene } = viewer
       const globe = scene.globe
 
-      // Hide the default globe — Google tiles replace it entirely.
-      // Keeping globe.show = true causes z-fighting and double-surface artifacts.
-      globe.show = false
+      // Google tiles replace it entirely.
+      // However, to use NASA Black Marble and night shaders, the globe must be visible.
+      globe.show = true
       globe.enableLighting = true
 
       // Black space background (visible where no tiles are loaded yet)
@@ -526,7 +529,8 @@ export default function CesiumGlobe({ onGlobeReady }) {
         }
       }
       // Load immediately — tiles are the primary surface, not a lazy enhancement
-      loadGoogle3DTiles()
+      // Disabled temporarily: Google 3D Tiles do not support imagery layer blending (e.g. NASA Black Marble).
+      // loadGoogle3DTiles()
 
       // Labels overlay removed — CartoDB imagery layers require globe.show = true
       // Google 3D Tiles provide their own visual surface.
