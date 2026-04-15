@@ -174,6 +174,7 @@ export default function LandingGlobeDemo({ immersive = false }) {
       .showAtmosphere(true)
       .atmosphereColor('rgba(0, 180, 255, 0.25)')
       .atmosphereAltitude(0.18)
+      /* POV shared with `LandingGoogleGlobe` (Map3D) — keep lat/lng/altitude aligned there */
       .pointOfView({ lat: 24, lng: 12, altitude: 2.35 })
 
     if (typeof globe.rendererSize === 'function') {
@@ -189,7 +190,8 @@ export default function LandingGlobeDemo({ immersive = false }) {
     controls.autoRotate = !reduceMotion
     controls.autoRotateSpeed = 0.35
     controls.enableDamping = true
-    controls.dampingFactor = 0.1
+    controls.dampingFactor = 0.14
+    controls.rotateSpeed = 1.12
 
     const idleMs = 7000
     let idleTimer = null

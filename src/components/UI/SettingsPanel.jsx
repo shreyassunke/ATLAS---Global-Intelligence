@@ -5,7 +5,7 @@ import { QUALITY_TIERS, TIER_NAMES } from '../../config/qualityTiers'
 import AlertRulesPanel from './AlertRulesPanel'
 
 const GLOBE_MODES = [
-    { id: 'cesium', label: 'Cesium', desc: '3D globe with terrain & close-up detail' },
+    { id: 'cesium', label: 'Google 3D', desc: 'Photorealistic Earth with native labels (Google Map3D)' },
     { id: 'globegl', label: 'Globe.GL', desc: 'Lightweight 3D globe, smooth & fast' },
     { id: 'leaflet', label: '2D Map', desc: 'Flat map, minimal GPU' },
 ]
@@ -17,16 +17,7 @@ const QUALITY_PRESETS = [
     { id: 'low', label: 'Low' },
 ]
 
-const TOGGLE_SETTINGS = [
-    { key: 'bloom', label: 'Bloom', icon: '✦' },
-    { key: 'nightLights', label: 'Night Lights', icon: '🌙' },
-    { key: 'tiles3d', label: '3D Buildings', icon: '🏙' },
-    { key: 'terrain', label: 'Terrain', icon: '⛰' },
-    { key: 'labels', label: 'Labels', icon: '🏷' },
-    { key: 'fog', label: 'Fog', icon: '🌫' },
-    { key: 'vignette', label: 'Vignette', icon: '◐' },
-    { key: 'autoRotate', label: 'Auto-Rotate', icon: '↻' },
-]
+const TOGGLE_SETTINGS = [{ key: 'autoRotate', label: 'Auto-Rotate', icon: '↻' }]
 
 const DATA_LAYER_TOGGLES = [
     { key: 'gdelt', label: 'GDELT Geopolitics', icon: '⚔', desc: 'Conflict, diplomacy, protests from GDELT 2.0' },
@@ -152,7 +143,7 @@ export default function SettingsPanel() {
                         </div>
                     </div>
 
-                    {/* ── Quality Preset (Cesium only) ── */}
+                    {/* ── Quality Preset (Google 3D globe only) ── */}
                     {isCesium && (
                         <div className="settings-section">
                             <div className="settings-section-label">
@@ -246,7 +237,7 @@ export default function SettingsPanel() {
                         </div>
                     </div>
 
-                    {/* ── Individual Toggles (Cesium only) ── */}
+                    {/* ── Globe features (Google 3D only) ── */}
                     {isCesium && (
                         <div className="settings-section">
                             <div className="settings-section-label">

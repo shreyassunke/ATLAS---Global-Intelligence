@@ -11,6 +11,23 @@ export function loadGoogleMapsSDK() {
     return Promise.reject(new Error('VITE_GOOGLE_MAPS_API_KEY not configured'))
   }
 
+  // Prefer the same loader as @vis.gl/react-google-maps (importLibrary). A second
+  // classic script tag without importLibrary breaks Map3D with:
+  // "google.maps.importLibrary is not installed."
+  if (typeof window.google?.maps?.importLibrary === 'function') {
+    loadPromise = window.google.maps
+      .importLibrary('streetView')
+      .then(() => {
+        isLoaded = true
+        return window.google.maps
+      })
+      .catch((err) => {
+        loadPromise = null
+        throw err
+      })
+    return loadPromise
+  }
+
   loadPromise = new Promise((resolve, reject) => {
     const callbackName = '__atlas_gmaps_cb_' + Date.now()
     window[callbackName] = () => {

@@ -21,9 +21,8 @@ import DimensionFilters from './components/UI/DimensionFilters'
 import { usePreferencesSync } from './hooks/usePreferencesSync'
 import LandingPage from './components/Landing/LandingPage'
 
-// Lazy-load heavy 3D components — Cesium (~4MB) and globe.gl/Three.js (~1MB) don't
-// need to be in the initial bundle since they're only rendered after onboarding.
-const CesiumGlobe = lazy(() => import('./components/Globe/CesiumGlobe'))
+// Lazy-load heavy 3D components — Google Map3D / globe.gl / Leaflet are loaded after onboarding.
+const GoogleGlobe = lazy(() => import('./components/Globe/GoogleGlobe'))
 const GlobeGLView = lazy(() => import('./components/Globe/GlobeGLView'))
 const FlatMap = lazy(() => import('./components/Globe/FlatMap'))
 const ParticleEarthTransition = lazy(() => import('./components/Transition/ParticleEarthTransition'))
@@ -41,8 +40,6 @@ export default function App() {
   const lastSunAngleRef = useRef(0)
   const globeMode = useAtlasStore((s) => s.globeMode)
   const initEventBusSystem = useAtlasStore((s) => s.initEventBusSystem)
-  const isCesium = globeMode === 'cesium'
-  const filterParams = useAtlasStore((s) => s.filterParams)
   const colorblindMode = useAtlasStore((s) => s.colorblindMode)
   const [filtersOpen, setFiltersOpen] = useState(false)
   useNewsData()
@@ -214,7 +211,7 @@ export default function App() {
               ) : globeMode === 'leaflet' ? (
                 <FlatMap onGlobeReady={() => setGlobeReady(true)} />
               ) : (
-                <CesiumGlobe onGlobeReady={() => setGlobeReady(true)} />
+                <GoogleGlobe onGlobeReady={() => setGlobeReady(true)} />
               )}
             </Suspense>
             <AnimatePresence>

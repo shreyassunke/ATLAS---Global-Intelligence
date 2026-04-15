@@ -14,7 +14,7 @@
  *
  * Day/night cycle reference: https://globe.gl/example/day-night-cycle/
  */
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, startTransition } from 'react'
 import Globe from 'globe.gl'
 import {
     TextureLoader, ShaderMaterial, Vector2, Vector3,
@@ -207,6 +207,7 @@ export default function GlobeGLView({ onGlobeReady }) {
     onGlobeReadyRef.current = onGlobeReady
     const idleTimerRef = useRef(null)
     const animFrameRef = useRef(null)
+    const lastZoomStoreEmitRef = useRef(0)
 
     const newsItems = useAtlasStore((s) => s.newsItems)
     const activeCategories = useAtlasStore((s) => s.activeCategories)
@@ -315,7 +316,8 @@ export default function GlobeGLView({ onGlobeReady }) {
         controls.autoRotate = initialAuto
         controls.autoRotateSpeed = 0.4
         controls.enableDamping = true
-        controls.dampingFactor = 0.1
+        controls.dampingFactor = 0.14
+        controls.rotateSpeed = 1.12
 
         const stopRotate = () => {
             if (!useAtlasStore.getState().getEffectiveSetting('autoRotate')) return
@@ -628,12 +630,15 @@ export default function GlobeGLView({ onGlobeReady }) {
         if (!globe) return
         const controls = globe.controls()
         const onZoom = () => {
+            const now = performance.now()
+            if (now - lastZoomStoreEmitRef.current < 100) return
+            lastZoomStoreEmitRef.current = now
             const dist = controls.getDistance?.() ?? 300
             const minD = 120
             const maxD = 600
             const clamped = Math.max(minD, Math.min(maxD, dist))
             const zoom = (clamped - minD) / (maxD - minD)
-            setZoomLevel(zoom)
+            startTransition(() => setZoomLevel(zoom))
         }
         controls.addEventListener('change', onZoom)
         return () => controls.removeEventListener('change', onZoom)

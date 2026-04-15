@@ -1,4 +1,4 @@
-/** Static chrome while `LandingGlobeDemo` (globe.gl) lazy-loads — keeps initial bundle light. */
+/** Placeholder while `LandingGoogleGlobe` (Map3D) lazy-loads — keeps initial JS light. */
 export function LandingGlobeDemoFallback({ immersive = false }) {
   if (immersive) {
     return <div className="landing-globe-immersive-fallback" aria-hidden />

@@ -129,8 +129,8 @@ const TIMEZONE_VIEW_CENTERS = {
   'Pacific/Auckland': { lng: 174, lat: -36 },
 }
 
-/** Default view (Africa/Europe) when timezone is unknown */
-const DEFAULT_VIEW_CENTER = { lng: 30, lat: 20 }
+/** Default view (Atlantic / mid-belt) when timezone cannot be resolved */
+const DEFAULT_VIEW_CENTER = { lng: 20, lat: 25 }
 
 /**
  * Returns { lng, lat } to center the globe on the user's timezone region.

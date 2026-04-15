@@ -5,7 +5,7 @@ import { AtlasWordmark } from '../UI/AtlasWordmark'
 import { useAtlasStore } from '../../store/atlasStore'
 import { LandingGlobeDemoFallback } from './LandingGlobeDemoFallback'
 
-const LandingGlobeDemo = lazy(() => import('./LandingGlobeDemo'))
+const LandingGoogleGlobe = lazy(() => import('./LandingGoogleGlobe'))
 
 const LANDING_NAV = [
   { id: 'the-problem', label: 'The Problem' },
@@ -114,7 +114,7 @@ export default function LandingPage() {
       <GlassFilter />
       <div className="landing-globe-immersive">
         <Suspense fallback={<LandingGlobeDemoFallback immersive />}>
-          <LandingGlobeDemo immersive />
+          <LandingGoogleGlobe />
         </Suspense>
       </div>
       <div className="landing-page__glow pointer-events-none" aria-hidden />

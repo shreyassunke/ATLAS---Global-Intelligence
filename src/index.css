@@ -2822,6 +2822,20 @@ button.atlas-logo-header-btn:focus-visible {
   opacity: 1;
 }
 
+/* At top of page the bar is still over the bright globe — light glass keeps nav readable */
+.stitch-nav-wrap--floating:not(.stitch-nav-wrap--scrolled) .stitch-nav-bar::before {
+  opacity: 0.48;
+}
+
+.stitch-nav-wrap--floating:not(.stitch-nav-wrap--scrolled) .stitch-nav-link,
+.stitch-nav-wrap--floating:not(.stitch-nav-wrap--scrolled) .stitch-nav-login-link {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.72);
+}
+
+.stitch-nav-wrap--floating:not(.stitch-nav-wrap--scrolled) .stitch-nav-logo {
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.65));
+}
+
 .stitch-nav-wrap--scrolled .stitch-nav-bar {
   border-color: rgba(255, 255, 255, 0.07);
   box-shadow:
@@ -4019,6 +4033,14 @@ button.atlas-logo-header-btn:focus-visible {
   background: #020408;
 }
 
+/* Map3D landing — same stage nudge as globe.gl immersive: sphere fills upper fold (see LandingGlobeDemo) */
+.landing-google-globe--elevated .landing-globe-demo--immersive__host {
+  top: clamp(-15vh, -11vw, -5.5rem);
+  bottom: auto;
+  height: calc(100% + clamp(11vh, 13vw, 17vh));
+  min-height: calc(100dvh + clamp(9vh, 11vw, 15vh));
+}
+
 .landing-globe-demo--immersive .landing-globe-demo__canvas {
   border-radius: 0;
 }
@@ -4710,4 +4732,24 @@ button.atlas-logo-header-btn:focus-visible {
   text-align: center;
   border-top: 1px solid var(--glass-border);
   background: rgba(0,0,0,0.2);
+}
+
+@keyframes atlas-globe-dot-pulse-kf {
+  0%, 100% { transform: scale(0.92); opacity: 0.78; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+.atlas-globe-dot-pulse {
+  animation: atlas-globe-dot-pulse-kf 1.8s ease-in-out infinite;
+  transform-origin: center center;
+}
+
+@keyframes atlas-globe-event-pulse-kf {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+
+.atlas-globe-event-pulse {
+  animation: atlas-globe-event-pulse-kf 1.2s ease-in-out infinite;
+  transform-origin: center center;
 }

@@ -21,6 +21,7 @@
     "@radix-ui/react-slot": "^1.2.4",
     "@supabase/supabase-js": "^2.99.3",
     "@tailwindcss/vite": "^4.2.1",
+    "@vis.gl/react-google-maps": "^1.8.3",
     "@vitejs/plugin-react": "^5.1.4",
     "cesium": "^1.139.0",
     "class-variance-authority": "^0.7.1",

@@ -57,7 +57,10 @@ function loadDataLayers() {
     const raw = localStorage.getItem(STORAGE_KEY_DATA_LAYERS)
     if (raw) {
       const parsed = JSON.parse(raw)
-      return { ...DEFAULT_DATA_LAYERS, ...parsed }
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const { labels: _legacyLabels, ...rest } = parsed
+        return { ...DEFAULT_DATA_LAYERS, ...rest }
+      }
     }
   } catch { /* ignore */ }
   return { ...DEFAULT_DATA_LAYERS }
@@ -179,6 +182,8 @@ export const useAtlasStore = create((set, get) => ({
   manualRefreshUsedToday: false,
   triggerManualRefresh: null,
   launchTransitionActive: false,
+  /** Skip the next globe intro fly-in (used after transition / dev) */
+  skipCesiumIntro: false,
   // ── EventBus / Intel Events ──
   events: [],
   eventMap: {},
@@ -210,7 +215,7 @@ export const useAtlasStore = create((set, get) => ({
   /** 'cesium' | 'globegl' | 'leaflet' */
   globeMode: loadGlobeMode(),
   /** 'auto' | 'high' | 'medium' | 'low' */
-  qualityTier: savedQuality?.tier || 'auto',
+  qualityTier: savedQuality?.tier || savedQuality?.priority || 'auto',
   /** Resolved priority after auto-detection: 'high' | 'medium' | 'low' */
   resolvedTier: savedQuality?.resolved || 'high',
   /** Per-setting overrides (user toggled individual settings) */

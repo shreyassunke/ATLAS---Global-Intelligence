@@ -1,9 +1,9 @@
 /**
  * Quality priority definitions for Atlas globe rendering.
  *
- * Each priority maps to a set of Cesium viewer/scene settings.
- * Auto-detection samples FPS during early frames and assigns
- * HIGH / MEDIUM / LOW automatically. User can override in Settings.
+ * The primary 3D globe uses Google Map3D (Google Earth renderer). Tiers mainly
+ * cap marker counts and auto-rotate; tile LOD and post-processing are handled by Google.
+ * Auto-detection samples FPS during early frames and assigns HIGH / MEDIUM / LOW.
  */
 
 export const TIER_NAMES = ['low', 'medium', 'high']
@@ -16,50 +16,23 @@ const QUALITY_STORAGE_KEY = 'atlas_quality_settings'
 const GLOBE_MODE_STORAGE_KEY = 'atlas_globe_mode'
 
 /**
- * Per-priority config — controls every tunable Cesium knob.
+ * Per-priority config for the Google Map3D globe path.
  */
 export const QUALITY_TIERS = {
     high: {
         label: 'High',
-        resolutionScale: () => Math.min(window.devicePixelRatio || 1.0, 2.0),
-        msaa: 2,
-        bloom: true,
-        vignette: true,
-        tiles3d: true,         // Google Photorealistic 3D Tiles
-        fog: true,
-        atmosphere: 'fragment', // perFragmentAtmosphere
-        maxScreenSpaceError: 8,  // Controls Google 3D Tile LOD quality
         maxMarkers: 300,
-        autoRotate: false, // opt-in via Settings — idle spin only when enabled
-        targetFrameRate: undefined, // uncapped
+        autoRotate: false,
     },
     medium: {
         label: 'Medium',
-        resolutionScale: () => 1.0,
-        msaa: 1,
-        bloom: false,
-        vignette: true,
-        tiles3d: true,        // Always load Google tiles (they are the surface)
-        fog: true,
-        atmosphere: 'vertex',
-        maxScreenSpaceError: 12, // Lower LOD for mid-range devices
         maxMarkers: 150,
         autoRotate: false,
-        targetFrameRate: 30,
     },
     low: {
         label: 'Low',
-        resolutionScale: () => 0.75,
-        msaa: 0,
-        bloom: false,
-        vignette: false,
-        tiles3d: true,        // Always load Google tiles (they are the surface)
-        fog: false,
-        atmosphere: 'off',
-        maxScreenSpaceError: 16, // Coarser LOD for low-end devices
         maxMarkers: 80,
         autoRotate: false,
-        targetFrameRate: 30,
     },
 }
 
@@ -158,7 +131,7 @@ export function saveQualitySettings(settings) {
 export function loadGlobeMode() {
     try {
         const stored = localStorage.getItem(GLOBE_MODE_STORAGE_KEY)
-        // Prevent Cesium out-of-memory crashes on mobile devices by overriding preference
+        // Heavy 3D globe — use lightweight renderer on small touch devices
         if (stored === 'cesium' && isMobileDevice()) {
             return 'globegl'
         }

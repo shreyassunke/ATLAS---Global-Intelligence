@@ -199,7 +199,7 @@ const NORMALIZERS = {
         const isSevere = ['volcanoes', 'severeStorms', 'floods', 'landslides'].includes(catId)
         return makeEvent({
           id: createEventId(lat, lng, Date.parse(geo.date || Date.now()), 'eonet', e.title),
-          priority: isSevere ? 'active' : 'latent',
+          priority: isSevere ? 'p2' : 'p3',
           dimension: 'environment', lat, lng, severity: isSevere ? 3 : 1,
           corroborationSources: ['eonet'], authoritative: true, ttl: 1800,
           title: e.title || 'Natural Event',
@@ -242,8 +242,8 @@ const NORMALIZERS = {
     const isMClass = flux >= 1e-5
     return [makeEvent({
       id: createEventId(0, 0, Date.now(), 'noaa-xray', `X-ray ${flux.toExponential(1)}`),
-      priority: isXClass ? 'critical' : 'active',
-      dimension: isXClass ? 'hazard' : 'signals',
+      priority: isXClass ? 'p1' : 'p2',
+      dimension: isXClass ? 'environment' : 'narrative',
       lat: 0, lng: 0, latApproximate: true,
       severity: isXClass ? 5 : isMClass ? 3 : 1,
       corroborationSources: ['noaa-xray'], authoritative: true, ttl: 600,
@@ -262,7 +262,7 @@ const NORMALIZERS = {
     const isExtreme = speed >= 800
     return [makeEvent({
       id: createEventId(70, -30, Date.now(), 'noaa-sw', `SW ${Math.round(speed)} km/s`),
-      priority: isExtreme ? 'active' : 'latent',
+      priority: isExtreme ? 'p2' : 'p3',
       dimension: 'narrative', lat: 70, lng: -30, latApproximate: true,
       severity: isExtreme ? 3 : 1,
       corroborationSources: ['noaa-sw'], authoritative: true, ttl: 600,
@@ -281,7 +281,7 @@ const NORMALIZERS = {
     for (const [coin, info] of Object.entries(data)) {
       const change = info?.usd_24h_change
       if (change === undefined || Math.abs(change) < 5) continue
-      const priority = Math.abs(change) >= 15 ? 'active' : 'latent'
+      const priority = Math.abs(change) >= 15 ? 'p2' : 'p3'
       const severity = Math.abs(change) >= 15 ? 3 : Math.abs(change) >= 10 ? 2 : 1
       events.push(makeEvent({
         id: createEventId(40.7, -74.0, Date.now(), 'coingecko', `${coin} ${change.toFixed(1)}%`),
@@ -306,7 +306,7 @@ const NORMALIZERS = {
     const isExtremeFear = value < 25
     return [makeEvent({
       id: createEventId(40.7, -74.0, Date.now(), 'alt-fng', `F&G ${value}`),
-      priority: value < 10 || value > 90 ? 'active' : 'latent',
+      priority: value < 10 || value > 90 ? 'p2' : 'p3',
       dimension: 'economy', lat: 40.7128, lng: -74.006, latApproximate: true,
       severity: value < 10 || value > 90 ? 3 : 1,
       corroborationSources: ['alt-fng'], ttl: 3600,
@@ -360,10 +360,10 @@ const NORMALIZERS = {
       const tone = parseFloat(props.tone?.split(',')?.[0] || 0)
 
       // Map tone to priority/severity (GDELT tone: negative = conflictive, positive = cooperative)
-      let priority = 'p3', severity = 1, dimension = 'signals'
-      if (tone <= -5) { priority = 'p2'; severity = 3; dimension = 'conflict' }
-      else if (tone <= -2) { priority = 'p2'; severity = 2; dimension = 'conflict' }
-      else if (tone >= 5) { priority = 'p3'; severity = 1; dimension = 'signals' }
+      let priority = 'p3', severity = 1, dimension = 'narrative'
+      if (tone <= -5) { priority = 'p2'; severity = 3; dimension = 'safety' }
+      else if (tone <= -2) { priority = 'p2'; severity = 2; dimension = 'safety' }
+      else if (tone >= 5) { priority = 'p3'; severity = 1; dimension = 'narrative' }
 
       const count = parseInt(props.numarts || props.numsources || 1)
       const corrobCount = Math.min(5, Math.max(1, Math.ceil(count / 3)))
@@ -470,7 +470,7 @@ const NORMALIZERS = {
       const pubDate = getXmlTag(item, 'pubDate')
       events.push(makeEvent({
         id: createEventId(46.2, 6.1, Date.parse(pubDate || Date.now()), 'who-don', title),
-        priority: title.toLowerCase().includes('emergency') ? 'critical' : 'latent',
+        priority: title.toLowerCase().includes('emergency') ? 'p1' : 'p3',
         dimension: 'people', lat: 46.2044, lng: 6.1432, latApproximate: true,
         severity: title.toLowerCase().includes('emergency') ? 4 : 1,
         corroborationSources: ['who-don'], authoritative: true, ttl: 3600,
@@ -573,7 +573,7 @@ const NORMALIZERS = {
       const minRange = parseFloat(entry.MIN_RNG || entry.min_rng || 0)
       return makeEvent({
         id: createEventId(0, 0, Date.now(), 'celestrak', `${name1}-${name2}`),
-        priority: minRange < 1 ? 'active' : 'latent',
+        priority: minRange < 1 ? 'p2' : 'p3',
         dimension: 'narrative', lat: 0, lng: 0, latApproximate: true,
         severity: minRange < 0.5 ? 3 : 1,
         corroborationSources: ['celestrak'], ttl: 3600,
@@ -596,7 +596,7 @@ const NORMALIZERS = {
       if (windSpeed > 80) {
         events.push(makeEvent({
           id: createEventId(data.latitude, data.longitude, Date.now(), 'open-meteo', `Wind ${windSpeed}`),
-          priority: windSpeed > 120 ? 'critical' : 'active',
+          priority: windSpeed > 120 ? 'p1' : 'p2',
           dimension: 'environment', lat: data.latitude, lng: data.longitude,
           severity: windSpeed > 120 ? 4 : 2,
           corroborationSources: ['open-meteo'], ttl: 1200,
@@ -725,7 +725,7 @@ const NORMALIZERS = {
     if (isNaN(price)) return []
     return [makeEvent({
       id: createEventId(29.8, -95.4, Date.now(), 'eia', `Oil $${price}`),
-      priority: price > 100 ? 'active' : 'latent',
+      priority: price > 100 ? 'p2' : 'p3',
       dimension: 'economy', lat: 29.7604, lng: -95.3698, latApproximate: true,
       severity: price > 100 ? 2 : 1,
       corroborationSources: ['eia'], ttl: 3600,
@@ -761,7 +761,7 @@ const NORMALIZERS = {
     return data.data.slice(0, 10).map(entry => {
       return makeEvent({
         id: createEventId(0, 0, Date.now(), 'abuseipdb', entry.ipAddress || ''),
-        priority: entry.abuseConfidenceScore > 90 ? 'active' : 'latent',
+        priority: entry.abuseConfidenceScore > 90 ? 'p2' : 'p3',
         dimension: 'safety', lat: 0, lng: 0, latApproximate: true,
         severity: entry.abuseConfidenceScore > 90 ? 3 : 1,
         corroborationSources: ['abuseipdb'], ttl: 600,
@@ -785,7 +785,7 @@ const NORMALIZERS = {
       const isICS = m.port === 502 || m.port === 102 || m.port === 44818
       return makeEvent({
         id: createEventId(lat, lng, Date.now(), 'shodan', `${m.ip_str}:${m.port}`),
-        priority: isICS ? 'active' : 'latent',
+        priority: isICS ? 'p2' : 'p3',
         dimension: 'safety', lat, lng, latApproximate: !m.location?.latitude,
         severity: isICS ? 3 : 1,
         corroborationSources: ['shodan'], ttl: 1800,
@@ -804,7 +804,7 @@ const NORMALIZERS = {
       const isHigh = val > 300
       return makeEvent({
         id: createEventId(m.latitude, m.longitude, Date.now(), 'safecast', `rad-${val}`),
-        priority: isHigh ? 'critical' : val > 100 ? 'active' : 'latent',
+        priority: isHigh ? 'p1' : val > 100 ? 'p2' : 'p3',
         dimension: 'environment', lat: m.latitude || 0, lng: m.longitude || 0,
         severity: isHigh ? 4 : val > 100 ? 3 : 1,
         corroborationSources: ['safecast'], ttl: 1800,
