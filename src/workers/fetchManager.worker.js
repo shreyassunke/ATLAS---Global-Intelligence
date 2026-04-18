@@ -1,4 +1,10 @@
 import { fetchGdeltCameoEvents } from '../services/gdelt/eventService.js'
+import { fetchGdeltJson, fetchGdeltText } from '../services/gdelt/gdeltHttp.js'
+import { fetchVgkgImagerySample } from '../services/gdelt/vgkgService.js'
+
+// #region agent log
+try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'fetchManager.worker.js:1',message:'L1 worker module loaded',data:{ua:typeof self!=='undefined'?String(self.constructor?.name||''):'?'},hypothesisId:'H1',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
+// #endregion
 
 const INITIAL_BACKOFF = 5000
 const MAX_BACKOFF = 300_000
@@ -217,14 +223,26 @@ const GDELT_GEO_DIM_QUERIES = [
   { query: '(media OR censorship OR journalist OR press OR disinformation OR narrative OR broadcast)', dimension: 'narrative' },
 ]
 
-const GDELT_DOC_OR_QUERY = [
-  '(conflict OR war OR military OR terror OR attack OR violence OR protest)',
-  '(election OR parliament OR law OR court OR sanctions OR diplomacy OR treaty OR government OR corruption)',
-  '(economy OR trade OR market OR inflation OR GDP OR tariff OR recession OR bank)',
-  '(humanitarian OR migration OR refugee OR health OR disease OR hospital OR hunger OR strike OR labor)',
-  '(climate OR environment OR pollution OR wildfire OR flood OR storm OR earthquake OR disaster OR renewable)',
-  '(media OR censorship OR journalist OR press OR disinformation OR narrative OR broadcast)',
-].join(' OR ')
+/**
+ * DOC ArtList chain — one request per ATLAS dimension.
+ *
+ * Combining all six OR-blocks into a single URL (~700 chars) causes GDELT to
+ * return an HTML error page for "query too long", silently yielding zero
+ * articles. Splitting also lets the normalizer use an explicit dimension hint
+ * instead of falling back to regex-based inference from the headline.
+ */
+const GDELT_DOC_DIM_QUERIES = [
+  { query: '(conflict OR war OR military OR terror OR attack OR violence OR protest)', dimension: 'safety' },
+  { query: '(election OR parliament OR law OR court OR sanctions OR diplomacy OR treaty OR government OR corruption)', dimension: 'governance' },
+  { query: '(economy OR trade OR market OR inflation OR GDP OR tariff OR recession OR bank)', dimension: 'economy' },
+  { query: '(humanitarian OR migration OR refugee OR health OR disease OR hospital OR hunger OR strike OR labor)', dimension: 'people' },
+  { query: '(climate OR environment OR pollution OR wildfire OR flood OR storm OR earthquake OR disaster OR renewable)', dimension: 'environment' },
+  { query: '(media OR censorship OR journalist OR press OR disinformation OR narrative OR broadcast)', dimension: 'narrative' },
+]
+
+const GDELT_DOC_BASE = 'https://api.gdeltproject.org/api/v2/doc/doc'
+/** Per-leg AbortController timeout for GDELT DOC/GEO chain legs. */
+const GDELT_LEG_TIMEOUT_MS = 20_000
 
 // ══════════════════════════════════════════════════════════════
 //  NORMALIZERS — one per source ID
@@ -522,22 +540,28 @@ const NORMALIZERS = {
 
   gdelt: (data) => {
     if (!data?.articles) return []
-    return data.articles.slice(0, 45).map((a) => {
+    const seen = new Set()
+    const out = []
+    for (const a of data.articles) {
       const url = a.url || ''
       const centroid = lookupCentroidFromSourceCountry(a.sourcecountry)
-      const lat = centroid?.lat ?? 0
-      const lng = centroid?.lng ?? 0
-      const hasGeo = Boolean(centroid)
-      const dimension = inferDocArticleDimension(a)
+      if (!centroid) continue
+      const lat = centroid.lat
+      const lng = centroid.lng
+
+      const hinted = typeof a._atlasDimensionHint === 'string' && a._atlasDimensionHint
+      const dimension = hinted || inferDocArticleDimension(a)
       const tsMs = gdeltSeendateToTimestampMs(a.seendate)
       const title = a.title || 'Global Event'
-      if (!hasGeo) {
-        return null
-      }
+
+      const dedupeKey = `${lat.toFixed(2)}|${lng.toFixed(2)}|${String(title).slice(0, 60)}`
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+
       let priority = 'p3'
       let severity = 1
       if (dimension === 'safety') { severity = 2; priority = 'p2' }
-      return makeEvent({
+      out.push(makeEvent({
         id: createEventId(lat, lng, tsMs, 'gdelt', title || url),
         priority,
         priority: priority, // legacy compat
@@ -552,10 +576,11 @@ const NORMALIZERS = {
         detail: `Outlet country: ${a.sourcecountry || 'unknown'}. Language: ${a.language || 'unknown'}.`,
         source: 'GDELT',
         sourceUrl: url || 'https://gdeltproject.org',
-        tags: ['news', 'gdelt', dimension, centroid?.iso || ''].filter(Boolean),
+        tags: ['news', 'gdelt', dimension, centroid.iso || ''].filter(Boolean),
         timestamp: new Date(tsMs).toISOString(),
-      })
-    }).filter(Boolean)
+      }))
+    }
+    return out
   },
 
   // ── MODULE 1: Conflict (UCDP) ──
@@ -1018,8 +1043,9 @@ const SOURCE_CONFIGS = {
     format: 'json', pollInterval: 300_000,
   },
   gdelt: {
-    url: `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(GDELT_DOC_OR_QUERY)}&mode=ArtList&maxrecords=45&format=json`,
-    format: 'json', pollInterval: 300_000,
+    format: 'json',
+    pollInterval: 300_000,
+    gdeltDocChain: GDELT_DOC_DIM_QUERIES,
   },
   'gdelt-events': {
     format: 'json',
@@ -1029,6 +1055,10 @@ const SOURCE_CONFIGS = {
   'gdelt-cameo': {
     format: 'json',
     pollInterval: 1_200_000,
+  },
+  'gdelt-vgkg': {
+    format: 'json',
+    pollInterval: 1_800_000,
   },
   ucdp: {
     url: 'https://ucdpapi.pcr.uu.se/api/gedevents/24.1?pagesize=50',
@@ -1164,6 +1194,66 @@ async function fetchSource(sourceId) {
 
   const state = getState(sourceId)
 
+  if (sourceId === 'gdelt-vgkg') {
+    try {
+      const rows = await fetchVgkgImagerySample({ limit: 60 })
+      const events = []
+      const seen = new Set()
+      for (const row of rows) {
+        const centroid = lookupCentroidFromSourceCountry(row.countryIso || '')
+        if (!centroid) continue
+        const key = row.id || row.pageUrl || row.imageUrl
+        if (!key || seen.has(key)) continue
+        seen.add(key)
+
+        const topLabels = (row.labels || [])
+          .slice(0, 5)
+          .map((l) => l.label)
+          .filter(Boolean)
+        const title = topLabels.length
+          ? `Visual GKG — ${topLabels.slice(0, 3).join(', ')}`
+          : 'Visual GKG frame'
+        const ts = Date.now()
+        events.push(makeEvent({
+          id: createEventId(centroid.lat, centroid.lng, ts, 'gdelt-vgkg', key),
+          priority: 'p3',
+          dimension: 'narrative',
+          lat: centroid.lat,
+          lng: centroid.lng,
+          latApproximate: true,
+          severity: 1,
+          corroborationSources: ['gdelt-vgkg'],
+          ttl: 1800,
+          title,
+          detail: topLabels.length
+            ? `Cloud Vision labels: ${topLabels.join(', ')}.`
+            : `Source: ${row.sourceName || 'unknown'}.`,
+          source: 'GDELT VGKG',
+          sourceUrl: row.pageUrl || row.imageUrl || 'https://www.gdeltproject.org',
+          tags: ['vgkg', 'gdelt', ...topLabels.slice(0, 3).map((l) => l.toLowerCase())],
+          timestamp: new Date(ts).toISOString(),
+          // Extras consumed by the event card UI:
+          imageUrl: row.imageUrl || '',
+          visualLabels: row.labels || [],
+        }))
+      }
+      state.backoff = INITIAL_BACKOFF
+      state.errorCount = 0
+      state.lastFetch = Date.now()
+      return events
+    } catch (err) {
+      state.errorCount++
+      state.backoff = Math.min(state.backoff * 2, MAX_BACKOFF)
+      self.postMessage({
+        type: 'SOURCE_ERROR',
+        sourceId,
+        error: err.message,
+        nextRetry: state.backoff,
+      })
+      return []
+    }
+  }
+
   if (sourceId === 'gdelt-cameo') {
     try {
       const rows = await fetchGdeltCameoEvents()
@@ -1214,20 +1304,79 @@ async function fetchSource(sourceId) {
     const fetchOpts = config.headers ? { headers: config.headers } : {}
     let data
 
-    if (Array.isArray(config.gdeltGeoChain) && config.gdeltGeoChain.length > 0) {
+    if (Array.isArray(config.gdeltDocChain) && config.gdeltDocChain.length > 0) {
+      // A1/A2: per-dimension ArtList requests, each with its own AbortController
+      // timeout; a single leg failure never nukes the rest.
+      const merged = { articles: [] }
+      const legErrors = []
+      for (let i = 0; i < config.gdeltDocChain.length; i++) {
+        if (i > 0) await sleep(GDELT_REQUEST_GAP_MS)
+        const { query, dimension } = config.gdeltDocChain[i]
+        const docUrl = `${GDELT_DOC_BASE}?query=${encodeURIComponent(query)}&mode=ArtList&maxrecords=15&format=json&sort=DateDesc`
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), GDELT_LEG_TIMEOUT_MS)
+        try {
+          const chunk = await fetchGdeltJson(docUrl, { signal: controller.signal })
+          for (const a of chunk?.articles || []) {
+            merged.articles.push({ ...a, _atlasDimensionHint: dimension })
+          }
+        } catch (legErr) {
+          legErrors.push(`${dimension}: ${legErr.message || legErr}`)
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+      if (!merged.articles.length && legErrors.length) {
+        throw new Error(legErrors.join(' · '))
+      }
+      if (legErrors.length) {
+        self.postMessage({
+          type: 'SOURCE_STATUS',
+          sourceId,
+          status: 'partial',
+          lastFetch: Date.now(),
+          eventCount: merged.articles.length,
+          warning: legErrors.join(' · '),
+        })
+      }
+      data = merged
+    } else if (Array.isArray(config.gdeltGeoChain) && config.gdeltGeoChain.length > 0) {
+      // A2: per-leg try/catch + AbortController; partial failures no longer nuke
+      // the whole chain.
       const merged = { type: 'FeatureCollection', features: [] }
+      const legErrors = []
       for (let i = 0; i < config.gdeltGeoChain.length; i++) {
         if (i > 0) await sleep(GDELT_REQUEST_GAP_MS)
         const { query, dimension } = config.gdeltGeoChain[i]
         const geoUrl = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodeURIComponent(query)}&mode=PointData&format=GeoJSON&timespan=60min&maxpoints=250`
-        const res = await fetch(geoUrl, fetchOpts)
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${geoUrl}`)
-        const chunk = await res.json()
-        for (const f of chunk.features || []) {
-          const props = f.properties || {}
-          f.properties = { ...props, _atlasDimensionHint: dimension }
-          merged.features.push(f)
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), GDELT_LEG_TIMEOUT_MS)
+        try {
+          const text = await fetchGdeltText(geoUrl, { signal: controller.signal })
+          const chunk = JSON.parse(text)
+          for (const f of chunk.features || []) {
+            const props = f.properties || {}
+            f.properties = { ...props, _atlasDimensionHint: dimension }
+            merged.features.push(f)
+          }
+        } catch (legErr) {
+          legErrors.push(`${dimension}: ${legErr.message || legErr}`)
+        } finally {
+          clearTimeout(timer)
         }
+      }
+      if (!merged.features.length && legErrors.length) {
+        throw new Error(legErrors.join(' · '))
+      }
+      if (legErrors.length) {
+        self.postMessage({
+          type: 'SOURCE_STATUS',
+          sourceId,
+          status: 'partial',
+          lastFetch: Date.now(),
+          eventCount: merged.features.length,
+          warning: legErrors.join(' · '),
+        })
       }
       data = merged
     } else if (config.format === 'json') {
@@ -1268,6 +1417,10 @@ async function pollSource(sourceId) {
   state.active = true
 
   const events = await fetchSource(sourceId)
+
+  // #region agent log
+  try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'fetchManager.worker.js:pollSource',message:'L2 pollSource fetch complete',data:{sourceId,count:events.length,errorCount:state.errorCount,lastError:state.lastError?String(state.lastError).slice(0,200):null,firstEvent:events[0]?{id:events[0].id,source:events[0].source,dim:events[0].dimension,lat:events[0].lat,lng:events[0].lng}:null},hypothesisId:'H2',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
+  // #endregion
 
   if (events.length > 0) {
     self.postMessage({ type: 'EVENTS', sourceId, events })

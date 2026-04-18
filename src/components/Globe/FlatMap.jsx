@@ -3,7 +3,7 @@
  *
  * Minimal GPU usage, perfect for mobile or very low-end devices.
  * Uses CartoDB dark tiles to match the Atlas aesthetic, with
- * circle markers colored by news category.
+ * circle markers for GDELT + NASA EONET / FIRMS (same rules as Map3D).
  */
 import { useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from 'react-leaflet'
@@ -12,9 +12,10 @@ import 'leaflet/dist/leaflet.css'
 import 'leaflet.heat'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
-import { getCategoryColor, CATEGORIES } from '../../utils/categoryColors'
 import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
 import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
+import { DIMENSION_COLORS } from '../../core/eventSchema'
+import { eventSourceToGlobeDataLayerKey } from '../../core/globeLayers'
 
 // Dark tile layer matching Atlas design
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
@@ -155,11 +156,18 @@ function ResetViewHandler() {
     return null
 }
 
+function eventRadius(evt) {
+    const base = evt.severity >= 4 ? 9 : evt.severity >= 3 ? 7 : 5
+    return base
+}
+
 export default function FlatMap({ onGlobeReady }) {
-    const newsItems = useAtlasStore((s) => s.newsItems)
-    const activeCategories = useAtlasStore((s) => s.activeCategories)
-    const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
+    const events = useAtlasStore((s) => s.events)
     const dataLayers = useAtlasStore((s) => s.dataLayers)
+    const activeDimensions = useAtlasStore((s) => s.activeDimensions)
+    const priorityFilter = useAtlasStore((s) => s.priorityFilter)
+    const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
+    const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
     const onGlobeReadyRef = useRef(onGlobeReady)
     onGlobeReadyRef.current = onGlobeReady
 
@@ -167,15 +175,33 @@ export default function FlatMap({ onGlobeReady }) {
     const heatOn = dataLayers?.gdeltHeatmap !== false
     const choroOn = dataLayers?.gdeltChoropleth === true
 
-    // Filter visible items
     const visibleItems = useMemo(() => {
-        return newsItems.filter(
-            (item) =>
-                item.lat != null &&
-                item.lng != null &&
-                activeCategories.has(item.category),
-        )
-    }, [newsItems, activeCategories])
+        const list = []
+        for (const evt of events) {
+            if (evt.lat == null || evt.lng == null) continue
+            const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
+            if (!layerKey || dataLayers[layerKey] === false) continue
+            if (!activeDimensions.has(evt.dimension)) continue
+            if (priorityFilter === 'p1' && evt.priority !== 'p1') continue
+            if (priorityFilter === 'p1p2' && evt.priority === 'p3') continue
+            list.push(evt)
+        }
+        return list
+    }, [events, dataLayers, activeDimensions, priorityFilter])
+
+    const handleEventClick = useCallback(
+        (evt) => {
+            const src = (evt.source || '').toLowerCase()
+            if (src.includes('gdelt')) {
+                setSelectedMarker(evt)
+                setSelectedEvent(null)
+            } else {
+                setSelectedEvent(evt)
+                setSelectedMarker(null)
+            }
+        },
+        [setSelectedEvent, setSelectedMarker],
+    )
 
     // Signal ready after mount
     useEffect(() => {
@@ -219,24 +245,23 @@ export default function FlatMap({ onGlobeReady }) {
                     <GdeltHeatLayer points={heatmapPoints} />
                 )}
 
-                {visibleItems.map((item) => {
-                    const color = getCategoryColor(item.category)
-                    const catInfo = CATEGORIES[item.category]
+                {visibleItems.map((evt) => {
+                    const color = DIMENSION_COLORS[evt.dimension] || '#1a90ff'
+                    const r = eventRadius(evt)
                     return (
                         <CircleMarker
-                            key={item.id}
-                            center={[item.lat, item.lng]}
-                            radius={item.mediaType === 'video' ? 7 : 5}
+                            key={evt.id}
+                            center={[evt.lat, evt.lng]}
+                            radius={r}
                             pathOptions={{
-                                color: color,
+                                color,
                                 fillColor: color,
-                                fillOpacity: item.mediaType === 'video' ? 0.8 : 0.6,
-                                weight: item.mediaType === 'video' ? 2.5 : 1.5,
-                                opacity: 0.8,
-                                dashArray: item.mediaType === 'video' ? '4 3' : undefined,
+                                fillOpacity: 0.65,
+                                weight: 1.5,
+                                opacity: 0.85,
                             }}
                             eventHandlers={{
-                                click: () => setSelectedMarker(item),
+                                click: () => handleEventClick(evt),
                             }}
                         >
                             <Tooltip
@@ -249,12 +274,10 @@ export default function FlatMap({ onGlobeReady }) {
                                         className="flatmap-tooltip-dot"
                                         style={{ background: color }}
                                     />
-                                    <span className="flatmap-tooltip-cat">
-                                        {catInfo?.icon} {catInfo?.label || item.category}
-                                    </span>
+                                    <span className="flatmap-tooltip-cat">{evt.source || 'Event'}</span>
                                 </div>
                                 <div className="flatmap-tooltip-title">
-                                    {truncate(item.title)}
+                                    {truncate(evt.title)}
                                 </div>
                             </Tooltip>
                         </CircleMarker>

@@ -13,6 +13,7 @@ import { parseTimelineJson } from './analyticsService.js'
 import { timespanFromTimeFilter } from './gdeltQueries.js'
 
 export const GDELT_TV_BASE = 'https://api.gdeltproject.org/api/v2/tv/tv'
+export const GDELT_TVAI_BASE = 'https://api.gdeltproject.org/api/v2/tvai/tvai'
 
 export { timespanFromTimeFilter }
 
@@ -93,19 +94,59 @@ export async function fetchTvClips(query, { timespan = '1440min', dataset, maxre
 }
 
 /**
+ * TV AI 2.0 — visual entity detection in broadcast news (logos, people,
+ * activities). Counterpart to the text-only TV API.
+ *
+ * https://blog.gdeltproject.org/the-gdelt-tv-2-0-visual-ngram-search-api/
+ */
+export async function fetchTvAiVisualEntities(query, { timespan = '1440min', maxrecords = 25, signal } = {}) {
+  const url = buildGdeltUrl(GDELT_TVAI_BASE, {
+    query: String(query || '').trim(),
+    mode: 'entitychart',
+    format: 'json',
+    datanorm: 'perc',
+    timespan,
+    maxrecords: Math.max(1, Math.min(100, Number(maxrecords) || 25)),
+  })
+  const json = await fetchGdeltJson(url, { signal })
+  const rows =
+    [json?.entitychart, json?.entityChart, json?.entities, json?.chart, json?.data].find((x) => Array.isArray(x)) || []
+  return rows
+    .map((row) => {
+      if (typeof row !== 'object' || row === null) return null
+      const name = row.entity ?? row.name ?? row.label ?? row.mid
+      const value = row.value ?? row.count ?? row.percent ?? row.freq
+      const kind = row.type ?? row.kind ?? ''
+      if (!name) return null
+      return {
+        name: String(name),
+        value: Number.isFinite(value) ? value : parseFloat(value) || 0,
+        kind: String(kind),
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 25)
+}
+
+/**
  * Parallel bundle for the TV section of the analytics panel.
  */
 export async function fetchTvBundle(query, timespan, opts = {}) {
   const settled = await Promise.allSettled([
     fetchTvTimeline(query, { timespan, ...opts }),
     fetchTvStationChart(query, { timespan, ...opts }),
+    fetchTvAiVisualEntities(query, { timespan, ...opts }),
+    fetchTvClips(query, { timespan, maxrecords: 8, ...opts }),
   ])
   const out = {
     timeline: { dates: [], series: [] },
     stations: [],
+    visualEntities: [],
+    clips: [],
     errors: [],
   }
-  const keys = ['timeline', 'stations']
+  const keys = ['timeline', 'stations', 'visualEntities', 'clips']
   settled.forEach((res, i) => {
     const key = keys[i]
     if (res.status === 'fulfilled') out[key] = res.value

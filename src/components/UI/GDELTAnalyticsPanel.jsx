@@ -23,10 +23,31 @@ import {
   fetchCountryStability,
   fetchThemeTimeline,
   fetchGkgEntities,
+  fetchEventSurge,
+  fetchQuadClassBreakdown,
+  fetchGcamEmotions,
+  fetchSourceDomainNetwork,
   queryToThemeToken,
 } from '../../services/gdelt/bigqueryService'
+import { fetchGdeltSummary } from '../../services/gdelt/summaryService'
 import { DIMENSION_COLORS, DIMENSION_LABELS } from '../../core/eventSchema'
 import ForceNetworkGraph from './ForceNetworkGraph'
+import ClipGallery from './ClipGallery'
+import VgkgImageryPanel from './VgkgImageryPanel'
+import TimeRangePicker from './TimeRangePicker'
+import ThemeExplorer from './ThemeExplorer'
+import GdeltAttribution from './GdeltAttribution'
+import gcamEmotions from '../../config/gcamEmotions.json'
+import {
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  AreaChart,
+  Area,
+  ReferenceLine,
+} from 'recharts'
 
 // ── Shared chart styling (kept here so every panel chart stays visually consistent) ──
 const AXIS_TICK = { fill: 'rgba(255,255,255,0.35)', fontSize: 9 }
@@ -49,7 +70,9 @@ const TABS = [
   { id: 'tv', label: 'TV' },
   { id: 'context', label: 'Context' },
   { id: 'history', label: 'Historical' },
+  { id: 'imagery', label: 'Imagery' },
   { id: 'network', label: 'Network' },
+  { id: 'themes', label: 'Themes' },
 ]
 
 function seriesToRows(dates, seriesList, seriesIndex = 0) {
@@ -186,6 +209,161 @@ function useLazyFetch(enabled, deps, fetcher) {
 
 // ── Per-tab views ──
 
+function SummaryCard({ query, timespan }) {
+  const { data, loading, error } = useLazyFetch(
+    !!query,
+    [query, timespan],
+    (signal) => fetchGdeltSummary(query, { timespan, signal }),
+  )
+  if (loading && !data) return null
+  if (error || !data || (!data.summary && !data.sources?.length)) return null
+  return (
+    <section className="rounded-lg border border-white/5 bg-white/[0.02] p-3">
+      <h3 className="mb-1.5 text-[9px] font-bold uppercase tracking-[0.2em] text-white/35">AI summary</h3>
+      {data.summary ? (
+        <p className="text-[11px] leading-relaxed text-white/80">{data.summary}</p>
+      ) : null}
+      {data.sources?.length ? (
+        <details className="mt-2 text-[10px] text-white/45">
+          <summary className="cursor-pointer select-none hover:text-white/70">
+            Sources consulted ({data.sources.length})
+          </summary>
+          <ul className="mt-1.5 space-y-1">
+            {data.sources.map((s, i) => (
+              <li key={`${s.url}-${i}`}>
+                <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-sky-300/80 hover:text-sky-200">
+                  {s.domain || new URL(s.url).hostname}
+                </a>
+                {s.title ? <span className="ml-1 text-white/60">— {s.title.slice(0, 80)}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </section>
+  )
+}
+
+function MentionsSpreadCard({ query, timespan, dimColor }) {
+  // Use DOC timelinevol as a live proxy for "how this story is spreading"
+  // when we don't have a BigQuery globalEventId. Same endpoint as the main
+  // timeline but bucketed at 15-min resolution.
+  const { data } = useLazyFetch(
+    !!query,
+    [query, timespan],
+    (signal) =>
+      import('../../services/gdelt/analyticsService').then((mod) =>
+        mod.fetchTimelineVol(query, timespan, { signal, timelinesmooth: 3 }),
+      ),
+  )
+  const rows = useMemo(() => seriesToRows(data?.dates, data?.series, 0), [data])
+  if (!rows.length) return null
+  return (
+    <section>
+      <h3 className="mb-2 text-[9px] font-bold uppercase tracking-[0.2em] text-white/35">How this story spread</h3>
+      <div style={{ height: 120 }} className="w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
+            <XAxis dataKey="x" tick={AXIS_TICK} interval="preserveStartEnd" />
+            <YAxis tick={AXIS_TICK} width={28} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Area type="monotone" dataKey="v" stroke={dimColor} fill={dimColor} fillOpacity={0.15} strokeWidth={1.5} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  )
+}
+
+function HistoricalPrecedentCard({ query }) {
+  // Overlay the current week's volume against the 30-day baseline using the
+  // eventSurge BigQuery template. No country? Return nothing — the surge
+  // query is country-scoped.
+  const theme = query ? queryToThemeToken(query) : null
+  const { data } = useLazyFetch(
+    !!theme,
+    [theme],
+    async (signal) => {
+      try { return await fetchEventSurge('US', { limit: 30, signal, bust: false }) }
+      catch { return [] }
+    },
+  )
+  const rows = Array.isArray(data) ? [...data].reverse() : []
+  if (!rows.length) return null
+
+  const mean = rows.reduce((a, r) => a + (Number(r.events) || 0), 0) / rows.length
+  const last = rows[rows.length - 1]
+  const z = Number(last?.zScore)
+  const hasZ = Number.isFinite(z)
+  const badge = hasZ
+    ? `${Math.abs(z).toFixed(1)}σ ${z >= 0 ? 'above' : 'below'} 30-day baseline`
+    : 'baseline ready'
+  const badgeColor = hasZ && Math.abs(z) >= 2
+    ? (z >= 0 ? 'rgba(248,113,113,0.9)' : 'rgba(96,165,250,0.9)')
+    : 'rgba(203,213,225,0.75)'
+
+  return (
+    <section className="rounded-lg border border-white/5 bg-white/[0.02] p-3">
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/35">Historical precedent (30d)</h3>
+        <span
+          className="rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
+          style={{ color: badgeColor, borderColor: badgeColor }}
+        >
+          {badge}
+        </span>
+      </div>
+      <div style={{ height: 110 }} className="w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={rows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} />
+            <XAxis dataKey="date" tick={AXIS_TICK} interval="preserveStartEnd" hide />
+            <YAxis tick={AXIS_TICK} width={28} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <ReferenceLine y={mean} stroke="#94a3b8" strokeDasharray="4 4" />
+            <Area type="monotone" dataKey="events" stroke="#EF9F27" fill="#EF9F27" fillOpacity={0.15} strokeWidth={1.5} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  )
+}
+
+function GcamRadarCard({ query }) {
+  const theme = query ? queryToThemeToken(query) : null
+  const { data } = useLazyFetch(
+    !!theme,
+    [theme],
+    async (signal) => {
+      try { return await fetchGcamEmotions(theme, { months: 3, limit: 8, signal }) }
+      catch { return [] }
+    },
+  )
+  const rows = Array.isArray(data) ? data : []
+  if (!rows.length) return null
+  const descByCode = new Map(gcamEmotions.map((e) => [e.code, e.description]))
+  const points = rows.map((r) => ({
+    emotion: descByCode.get(r.code) || r.code,
+    value: Number(r.avgValue) || 0,
+  }))
+  return (
+    <section>
+      <h3 className="mb-2 text-[9px] font-bold uppercase tracking-[0.2em] text-white/35">GCAM emotions (3m)</h3>
+      <div style={{ height: 220 }} className="w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <RadarChart data={points} outerRadius="75%">
+            <PolarGrid stroke={GRID_STROKE} />
+            <PolarAngleAxis dataKey="emotion" tick={{ fill: 'rgba(255,255,255,0.45)', fontSize: 9 }} />
+            <PolarRadiusAxis tick={{ fill: 'rgba(255,255,255,0.25)', fontSize: 8 }} />
+            <Radar dataKey="value" stroke="#7F77DD" fill="#7F77DD" fillOpacity={0.25} />
+          </RadarChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
+  )
+}
+
 function TrendsTab({ ctx, timespan, dimColor }) {
   const { data, loading, error, refresh } = useLazyFetch(
     !!ctx?.query,
@@ -204,12 +382,16 @@ function TrendsTab({ ctx, timespan, dimColor }) {
   return (
     <div className="space-y-4">
       <WarnBanner errors={data.errors} />
+      <SummaryCard query={ctx?.query} timespan={timespan} />
       <Section title="Coverage volume">
         <TimelineCard rows={volRows} color={dimColor} label="Articles" emptyText="No timeline data." />
       </Section>
+      <MentionsSpreadCard query={ctx?.query} timespan={timespan} dimColor={dimColor} />
+      <HistoricalPrecedentCard query={ctx?.query} />
       <Section title="Tone trajectory">
         <TimelineCard rows={toneRows} color="#7F77DD" label="Avg tone" emptyText="No tone timeline." />
       </Section>
+      <GcamRadarCard query={ctx?.query} />
       <Section title="Source countries (window)">
         <VerticalBarCard data={data.sourceCountries} color={dimColor} label="Attention" emptyText="No country breakdown." />
       </Section>
@@ -245,6 +427,7 @@ function TrendsTab({ ctx, timespan, dimColor }) {
       <RefreshFooter onClick={refresh} loading={loading}>
         Data: GDELT 2.0 DOC API · Volume shown as share of global monitoring where applicable.
       </RefreshFooter>
+      <GdeltAttribution compact />
     </div>
   )
 }
@@ -263,6 +446,11 @@ function TvTab({ ctx, timespan }) {
   if (loading && !data) return <Loading text="Loading television data…" />
   if (error) return <ErrorBanner message={error} />
   if (!data) return null
+
+  const visualEntityRows = useMemo(
+    () => (data?.visualEntities || []).slice(0, 10).map((e) => ({ name: e.name, value: e.value })),
+    [data],
+  )
 
   return (
     <div className="space-y-4">
@@ -283,9 +471,21 @@ function TvTab({ ctx, timespan }) {
           emptyText="No station breakdown returned."
         />
       </Section>
+      <Section title="On-screen entities (TV AI)">
+        <VerticalBarCard
+          data={visualEntityRows}
+          color="#7F77DD"
+          label="Share of airtime"
+          emptyText="TV AI returned no visual entities for this query."
+        />
+      </Section>
+      <Section title="Recent clips">
+        <ClipGallery clips={data.clips} emptyText="No matching clips in window." />
+      </Section>
       <RefreshFooter onClick={refresh} loading={loading}>
-        Data: GDELT TV 2.0 API · Measured against the Internet Archive TV News feed.
+        Data: GDELT TV 2.0 + TV AI 2.0 · Measured against the Internet Archive TV News feed.
       </RefreshFooter>
+      <GdeltAttribution compact />
     </div>
   )
 }
@@ -345,51 +545,106 @@ function ContextTab({ ctx, timespan }) {
 }
 
 function HistoryTab({ ctx, dimColor }) {
-  // Phase 5: these call the Vercel backend which proxies BigQuery.
-  // The country token is optional — caller picks a country via the HUD one day;
-  // for now we pull a generic theme timeline from the query's keywords.
+  // Phase 5 + C5: TimeRangePicker drives every template's months param.
   const enabled = !!ctx?.query
+  const [months, setMonths] = useState(60)
+
   const { data, loading, error, refresh } = useLazyFetch(
     enabled,
-    [ctx?.query],
+    [ctx?.query, months],
     async (signal) => {
-      const [timeline, stability] = await Promise.allSettled([
-        fetchThemeTimeline(ctx.query, { months: 60, signal }),
-        fetchCountryStability(null, { years: 5, signal }),
+      const years = Math.max(1, Math.min(30, Math.round(months / 12)))
+      const [timeline, stability, quad, domains] = await Promise.allSettled([
+        fetchThemeTimeline(ctx.query, { months, limit: 500, signal }),
+        fetchCountryStability(null, { years, limit: 20, signal }),
+        fetchQuadClassBreakdown({ months: Math.min(months, 120), limit: 250, signal }),
+        fetchSourceDomainNetwork(ctx.query, { months: Math.min(months, 24), limit: 15, signal }),
       ])
       return {
         timeline: timeline.status === 'fulfilled' ? timeline.value : [],
         stability: stability.status === 'fulfilled' ? stability.value : [],
-        errors: [timeline, stability]
-          .filter((r) => r.status === 'rejected')
-          .map((r, i) => ({ key: ['timeline', 'stability'][i], message: r.reason?.message || String(r.reason) })),
+        quad: quad.status === 'fulfilled' ? quad.value : [],
+        domains: domains.status === 'fulfilled' ? domains.value : [],
+        errors: [timeline, stability, quad, domains]
+          .map((r, i) => (r.status === 'rejected'
+            ? { key: ['timeline', 'stability', 'quad', 'domains'][i], message: r.reason?.message || String(r.reason) }
+            : null))
+          .filter(Boolean),
       }
     },
   )
 
-  if (loading && !data) return <Loading text="Querying BigQuery historical archive…" />
-  if (error) return <ErrorBanner message={error} />
-  if (!data) return null
-
-  const timelineRows = data.timeline?.length
+  const timelineRows = data?.timeline?.length
     ? data.timeline.map((r) => ({ x: formatGdeltDateTick(r.date), v: r.value }))
     : []
-  const stabilityRows = (data.stability || [])
+  const stabilityRows = (data?.stability || [])
     .slice(0, 12)
     .map((r) => ({ name: r.country || r.name || '—', value: Math.abs(r.avgGoldstein ?? r.value ?? 0) }))
+  const quadRows = useMemo(() => {
+    // Aggregate across countries so the panel shows a global QuadClass split.
+    const totals = [0, 0, 0, 0]
+    for (const row of data?.quad || []) {
+      const qc = Number(row.QuadClass)
+      const events = Number(row.events) || 0
+      if (qc >= 1 && qc <= 4) totals[qc - 1] += events
+    }
+    const labels = ['Verbal coop', 'Material coop', 'Verbal conflict', 'Material conflict']
+    return labels.map((name, i) => ({ name, value: totals[i] }))
+  }, [data])
+  const domainRows = (data?.domains || [])
+    .slice(0, 12)
+    .map((r) => ({ name: r.source || '—', value: Number(r.documents) || 0 }))
 
   return (
     <div className="space-y-4">
-      <WarnBanner errors={data.errors} />
-      <Section title="Theme timeline (5y)">
-        <TimelineCard rows={timelineRows} color={dimColor} label="Monthly mentions" emptyText="No historical theme data." />
-      </Section>
-      <Section title="Least-stable countries (5y avg Goldstein)">
-        <VerticalBarCard data={stabilityRows} color="#E24B4A" label="|Goldstein|" emptyText="No stability data returned." />
-      </Section>
+      <TimeRangePicker value={months} onChange={setMonths} defaultMonths={60} syncToUrl />
+      {loading && !data && <Loading text="Querying BigQuery historical archive…" />}
+      {error && <ErrorBanner message={error} />}
+      {data && <WarnBanner errors={data.errors} />}
+      {data && (
+        <>
+          <Section title={`Theme timeline (${months}m)`}>
+            <TimelineCard rows={timelineRows} color={dimColor} label="Monthly mentions" emptyText="No historical theme data." />
+          </Section>
+          <Section title="CAMEO QuadClass split">
+            <VerticalBarCard data={quadRows} color="#378ADD" label="Events" emptyText="No QuadClass data." />
+          </Section>
+          <Section title="Top source domains">
+            <VerticalBarCard data={domainRows} color="#7F77DD" label="Documents" emptyText="No domain network returned." />
+          </Section>
+          <Section title="Least-stable countries (avg Goldstein)">
+            <VerticalBarCard data={stabilityRows} color="#E24B4A" label="|Goldstein|" emptyText="No stability data returned." />
+          </Section>
+        </>
+      )}
       <RefreshFooter onClick={refresh} loading={loading}>
-        Data: GDELT BigQuery archive (gdelt-bq.gdeltv2.events_partitioned, gkg_partitioned).
+        Data: GDELT BigQuery archive (events_partitioned, gkg_partitioned, eventmentions_partitioned, vgkg_partitioned, iatv).
       </RefreshFooter>
+      <GdeltAttribution compact />
+    </div>
+  )
+}
+
+function ImageryTab({ ctx }) {
+  const theme = ctx?.query ? queryToThemeToken(ctx.query) : null
+  if (!theme) return <Empty>Select a cluster to explore imagery.</Empty>
+  return (
+    <div className="space-y-3">
+      <VgkgImageryPanel theme={theme} months={3} country={null} />
+      <GdeltAttribution compact />
+    </div>
+  )
+}
+
+function ThemesTab() {
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] leading-relaxed text-white/40">
+        Browse GDELT's 4,000+ GKG themes and 2,300+ GCAM emotion dimensions. Selecting a theme
+        makes it the active ATLAS analytics query across every tab.
+      </p>
+      <ThemeExplorer />
+      <GdeltAttribution compact />
     </div>
   )
 }
@@ -463,6 +718,7 @@ function NetworkTab({ ctx }) {
       <RefreshFooter onClick={refresh} loading={loading}>
         Data: GDELT GKG (gkg_partitioned) · entity co-occurrence with theme.
       </RefreshFooter>
+      <GdeltAttribution compact />
     </div>
   )
 }
@@ -576,7 +832,7 @@ export default function GDELTAnalyticsPanel() {
             </div>
 
             {/* Timespan selector (BigQuery tabs own their own time range) */}
-            {tab !== 'history' && tab !== 'network' && (
+            {tab !== 'history' && tab !== 'network' && tab !== 'imagery' && tab !== 'themes' && (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-white/35">Timespan</span>
                 {TIME_OPTIONS.map((opt) => (
@@ -600,7 +856,9 @@ export default function GDELTAnalyticsPanel() {
             {tab === 'tv' && <TvTab ctx={ctx} timespan={timespan} />}
             {tab === 'context' && <ContextTab ctx={ctx} timespan={timespan} />}
             {tab === 'history' && <HistoryTab ctx={ctx} dimColor={dimColor} />}
+            {tab === 'imagery' && <ImageryTab ctx={ctx} />}
             {tab === 'network' && <NetworkTab ctx={ctx} />}
+            {tab === 'themes' && <ThemesTab />}
           </div>
         </motion.div>
       ) : null}

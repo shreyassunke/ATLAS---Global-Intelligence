@@ -62,12 +62,17 @@ export function queryToThemeToken(query) {
 
 /**
  * Low-level: post to the proxy. Throws on network / 4xx / 5xx with the
- * server's detail message when available.
+ * server's detail message when available. Pass `bust: true` to skip the
+ * in-memory cache (used by the "Refresh" button on every historical surface).
  */
-export async function postTemplate(template, params, { signal } = {}) {
+export async function postTemplate(template, params, { signal, bust = false } = {}) {
   const key = cacheKey(template, params)
-  const cached = getCached(key)
-  if (cached) return cached
+  if (!bust) {
+    const cached = getCached(key)
+    if (cached) return cached
+  } else {
+    cache.delete(key)
+  }
 
   const url = `${API_BASE}/api/gdelt-query`
   const res = await fetch(url, {
@@ -135,11 +140,68 @@ export async function fetchEventSurge(country, { limit = 50, signal } = {}) {
 }
 
 /** Returns top persons/organisations co-occurring with a theme. */
-export async function fetchGkgEntities(queryOrTheme, { field = 'persons', months = 3, limit = 60, signal } = {}) {
+export async function fetchGkgEntities(queryOrTheme, { field = 'persons', months = 3, limit = 60, signal, bust } = {}) {
   const theme = queryOrTheme && queryOrTheme === queryOrTheme.toUpperCase()
     ? queryOrTheme
     : queryToThemeToken(queryOrTheme)
-  return postTemplate('gkgEntities', { theme, field, months, limit }, { signal })
+  return postTemplate('gkgEntities', { theme, field, months, limit }, { signal, bust })
+}
+
+/**
+ * Per-event mention cadence over the last N days — powers the "How this
+ * story spread" card.
+ */
+export async function fetchMentionsProgression(globalEventId, { days = 14, limit = 500, signal, bust } = {}) {
+  return postTemplate(
+    'mentionsProgression',
+    { globalEventId, days, limit },
+    { signal, bust },
+  )
+}
+
+/**
+ * CAMEO QuadClass (1-4) breakdown per country over the last N months.
+ * Pass an ISO2/ISO3 country code to restrict to a single territory.
+ */
+export async function fetchQuadClassBreakdown({ country = null, months = 6, limit = 250, signal, bust } = {}) {
+  return postTemplate(
+    'quadClassBreakdown',
+    { country: country || undefined, months, limit },
+    { signal, bust },
+  )
+}
+
+/** Top Cloud Vision labels for a VGKG theme (and optional country). */
+export async function fetchVisualGkgLabels(queryOrTheme, { months = 3, country = null, limit = 60, signal, bust } = {}) {
+  const theme = queryOrTheme && queryOrTheme === queryOrTheme.toUpperCase()
+    ? queryOrTheme
+    : queryToThemeToken(queryOrTheme)
+  return postTemplate(
+    'visualGkgLabels',
+    { theme, months, limit, ...(country ? { country } : {}) },
+    { signal, bust },
+  )
+}
+
+/** Top GCAM emotion codes + average values for a theme. */
+export async function fetchGcamEmotions(queryOrTheme, { months = 3, limit = 40, signal, bust } = {}) {
+  const theme = queryOrTheme && queryOrTheme === queryOrTheme.toUpperCase()
+    ? queryOrTheme
+    : queryToThemeToken(queryOrTheme)
+  return postTemplate('gcamEmotions', { theme, months, limit }, { signal, bust })
+}
+
+/** Top source domains + activity for a theme (co-citation network). */
+export async function fetchSourceDomainNetwork(queryOrTheme, { months = 3, limit = 150, signal, bust } = {}) {
+  const theme = queryOrTheme && queryOrTheme === queryOrTheme.toUpperCase()
+    ? queryOrTheme
+    : queryToThemeToken(queryOrTheme)
+  return postTemplate('sourceDomainNetwork', { theme, months, limit }, { signal, bust })
+}
+
+/** Long-range TV mention trend (IA TV News Archive, via BigQuery). */
+export async function fetchTvTimelineBq(keyword, { months = 24, limit = 500, signal, bust } = {}) {
+  return postTemplate('tvTimeline', { keyword, months, limit }, { signal, bust })
 }
 
 /** Clears the in-memory result cache (useful for a "force refresh" button). */

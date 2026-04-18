@@ -47,12 +47,21 @@ const DEFAULT_DATA_LAYERS = {
   gdelt: true,           // Geopolitical events from GDELT 2.0
   firms: true,           // NASA FIRMS active fires
   usgs: true,            // USGS earthquakes
-  news: true,            // News articles from commercial APIs
   gdacs: true,           // GDACS disasters
   eonet: true,           // NASA EONET natural events
-  gdeltHeatmap: true,    // GDELT GEO PointHeatmap density overlay
+  // GDELT GEO PointHeatmap — off by default. Rendered as wide radial red/yellow
+  // gradient sprites (96px) whose combined footprint leaves faded "ghost dots"
+  // on the globe wherever any article was filed in the last 24h, even when
+  // there's no live event there. Users can re-enable from the data-layers HUD.
+  gdeltHeatmap: false,
   gdeltChoropleth: false,// GDELT GEO per-country tone choropleth
 }
+
+/**
+ * One-time migration key: bumped whenever a data-layer default flips from ON
+ * to OFF so existing users stop seeing the old layer after pull/reload.
+ */
+const DATA_LAYERS_MIGRATION_KEY = 'atlas_data_layers_migration_v2'
 
 function loadDataLayers() {
   try {
@@ -61,10 +70,24 @@ function loadDataLayers() {
       const parsed = JSON.parse(raw)
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         const { labels: _legacyLabels, ...rest } = parsed
+        // v2: GDELT heatmap default flipped to off. Force any stale `true`
+        // from a previous session back to the new default so faded heatmap
+        // blobs don't keep rendering for returning users.
+        if (!localStorage.getItem(DATA_LAYERS_MIGRATION_KEY)) {
+          if (rest.gdeltHeatmap === true) rest.gdeltHeatmap = false
+          try {
+            localStorage.setItem(DATA_LAYERS_MIGRATION_KEY, '1')
+            localStorage.setItem(
+              STORAGE_KEY_DATA_LAYERS,
+              JSON.stringify({ ...DEFAULT_DATA_LAYERS, ...rest }),
+            )
+          } catch { /* ignore */ }
+        }
         return { ...DEFAULT_DATA_LAYERS, ...rest }
       }
     }
   } catch { /* ignore */ }
+  try { localStorage.setItem(DATA_LAYERS_MIGRATION_KEY, '1') } catch { /* ignore */ }
   return { ...DEFAULT_DATA_LAYERS }
 }
 
@@ -136,8 +159,20 @@ function loadActiveDimensions() {
 
 function loadFilters() {
   const params = new URLSearchParams(window.location.search)
+  // One-time migration: older builds defaulted to 'p1' ("Breaking only") which
+  // hid every GDELT event (they emit at p2/p3), making the globe appear empty
+  // on first load. Bump stale defaults to 'all' so returning users see data.
+  try {
+    if (!localStorage.getItem('atlas_priority_default_v2')) {
+      const stored = localStorage.getItem('atlas_priority_filter')
+      if (!stored || stored === 'p1') {
+        localStorage.setItem('atlas_priority_filter', 'all')
+      }
+      localStorage.setItem('atlas_priority_default_v2', '1')
+    }
+  } catch { /* ignore */ }
   return {
-    priority: params.get('pri') || localStorage.getItem('atlas_priority_filter') || 'p1',
+    priority: params.get('pri') || localStorage.getItem('atlas_priority_filter') || 'all',
     time: params.get('time') || localStorage.getItem('atlas_time_filter') || 'live'
   }
 }
@@ -418,6 +453,9 @@ export const useAtlasStore = create((set, get) => ({
     initEventBus()
 
     const unsub = subscribeToBatchUpdates((diff) => {
+      // #region agent log
+      try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'atlasStore.js:batchUpdate',message:'L4 store batch update',data:{snapshot:diff.snapshot?diff.snapshot.length:null,added:diff.added?diff.added.length:0,updated:diff.updated?diff.updated.length:0,removed:diff.removed?diff.removed.length:0},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
+      // #endregion
       set((s) => {
         if (diff.snapshot) {
           const map = {}

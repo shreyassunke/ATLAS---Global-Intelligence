@@ -19,6 +19,7 @@
 import { resolveTemplate, TEMPLATE_NAMES } from './_lib/queryTemplates.js'
 import { runQuery } from './_lib/bigquery.js'
 import { checkRateLimit, clientIpFromReq } from './_lib/rateLimiter.js'
+import { estimateBytes, formatBytes } from './_lib/bytesGuard.js'
 
 export const config = {
   runtime: 'nodejs',
@@ -108,6 +109,29 @@ export default async function handler(req, res) {
 
   const started = Date.now()
   try {
+    let estimate = null
+    try {
+      estimate = await estimateBytes({
+        query: resolved.query,
+        params: resolved.params,
+        types: resolved.types,
+      })
+    } catch (e) {
+      // Dry-run failures are non-fatal: fall through to the real query so a
+      // transient control-plane hiccup doesn't block legitimate traffic.
+      estimate = { bytes: null, limit: null, allowed: true, error: e.message }
+    }
+
+    if (estimate && estimate.allowed === false) {
+      res.setHeader('Cache-Control', 'no-store')
+      return sendJson(res, 413, {
+        error: 'scan size exceeds ATLAS_MAX_SCAN_BYTES',
+        detail: `template '${template}' would scan ${formatBytes(estimate.bytes)} (limit ${formatBytes(estimate.limit)}). Tighten time range or limit.`,
+        bytes: estimate.bytes,
+        limit: estimate.limit,
+      })
+    }
+
     const rows = await runQuery({
       query: resolved.query,
       params: resolved.params,
@@ -116,7 +140,15 @@ export default async function handler(req, res) {
     })
     const durationMs = Date.now() - started
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400')
-    return sendJson(res, 200, { rows, template, durationMs })
+    if (estimate?.bytes != null) {
+      res.setHeader('x-atlas-estimated-bytes', String(estimate.bytes))
+    }
+    return sendJson(res, 200, {
+      rows,
+      template,
+      durationMs,
+      estimatedBytes: estimate?.bytes ?? null,
+    })
   } catch (e) {
     const msg = e?.message || String(e)
     const isConfig = /credentials|project|not set/i.test(msg)

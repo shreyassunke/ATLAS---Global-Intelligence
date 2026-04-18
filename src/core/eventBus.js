@@ -4,6 +4,34 @@ let subscribers = new Set()
 let sourceStatusSubscribers = new Set()
 let sourceStatuses = {}
 
+/**
+ * Dev-only breadcrumbs: log the first N events per source so it is obvious at a
+ * glance whether data is actually flowing. Disabled in production builds.
+ */
+const BREADCRUMB_LIMIT = 5
+const DEV_BREADCRUMBS = Boolean(import.meta?.env?.DEV)
+const breadcrumbCounts = new Map()
+
+function logBreadcrumb(event) {
+  if (!DEV_BREADCRUMBS || !event) return
+  const src = event.source || 'unknown'
+  const count = breadcrumbCounts.get(src) || 0
+  if (count >= BREADCRUMB_LIMIT) return
+  breadcrumbCounts.set(src, count + 1)
+  // eslint-disable-next-line no-console
+  console.info(
+    `[eventBus] first-${count + 1}/${BREADCRUMB_LIMIT} from ${src}:`,
+    {
+      title: event.title,
+      dimension: event.dimension,
+      priority: event.priority,
+      lat: event.lat,
+      lng: event.lng,
+      ts: event.timestamp,
+    },
+  )
+}
+
 export function initEventBus() {
   if (eventBusWorker) return
 
@@ -34,9 +62,16 @@ export function initEventBus() {
     const { type } = msg.data
 
     if (type === 'EVENTS') {
+      const events = msg.data.events || []
+      // #region agent log
+      try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'eventBus.js:EVENTS',message:'L3 fetchWorker EVENTS received',data:{sourceId:msg.data.sourceId,count:events.length,firstSource:events[0]?.source||null,firstDim:events[0]?.dimension||null},hypothesisId:'H3',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
+      // #endregion
+      if (DEV_BREADCRUMBS && events.length) {
+        for (const evt of events) logBreadcrumb(evt)
+      }
       eventBusWorker.postMessage({
         type: 'INGEST',
-        payload: { events: msg.data.events },
+        payload: { events },
       })
     }
 
@@ -45,6 +80,14 @@ export function initEventBus() {
         status: msg.data.status,
         lastFetch: msg.data.lastFetch,
         eventCount: msg.data.eventCount,
+        warning: msg.data.warning,
+      }
+      if (DEV_BREADCRUMBS) {
+        // eslint-disable-next-line no-console
+        console.info(
+          `[eventBus] ${msg.data.sourceId} → ${msg.data.status}`,
+          { events: msg.data.eventCount, warning: msg.data.warning || null },
+        )
       }
       for (const fn of sourceStatusSubscribers) fn({ ...sourceStatuses })
     }
@@ -54,6 +97,13 @@ export function initEventBus() {
         status: 'error',
         error: msg.data.error,
         nextRetry: msg.data.nextRetry,
+      }
+      if (DEV_BREADCRUMBS) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[eventBus] ${msg.data.sourceId} → error`,
+          { error: msg.data.error, nextRetry: msg.data.nextRetry },
+        )
       }
       for (const fn of sourceStatusSubscribers) fn({ ...sourceStatuses })
     }

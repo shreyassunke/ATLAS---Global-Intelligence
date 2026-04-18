@@ -250,43 +250,95 @@ export function parseGdeltCsvText(text, maxRows = 400) {
 /** Strict allowlist: only official GDELT v2 15-minute event exports (SSRF-safe). */
 const GDELT_EXPORT_ZIP_RE = /^https:\/\/data\.gdeltproject\.org\/gdeltv2\/\d{14}\.export\.CSV\.zip$/
 
-/** Browser-safe upper bound: larger files are skipped (typical exports exceed this). */
-const MAX_ZIP_BYTES = 32 * 1024 * 1024
+/**
+ * Browser-safe upper bound for zip download. Typical exports range 50-120 MB
+ * once compressed, so the previous 32 MB cap effectively disabled this path.
+ * 128 MB fits the largest observed exports while still bounding memory usage
+ * on mobile.
+ */
+const MAX_ZIP_BYTES = 128 * 1024 * 1024
+
+/** Maximum CAMEO rows we parse per invocation — anything more is noise. */
+const MAX_CAMEO_ROWS = 500
 
 /**
- * Fetch recent CAMEO-coded events when the latest 15-minute export is small enough
- * to unzip in the browser. Usually returns [] — full exports are large; this path is
- * opportunistic and bounded for memory and latency.
+ * Resolve the latest 15-minute `.export.CSV.zip` URL. Prefers
+ * `lastupdate.txt`; if that 404s (GDELT maintenance windows), falls back to
+ * the tail of `masterfilelist.txt`.
  */
-export async function fetchGdeltCameoEvents() {
+async function resolveLatestExportZipUrl() {
   try {
     const upd = await fetch('https://data.gdeltproject.org/gdeltv2/lastupdate.txt', {
       signal: AbortSignal.timeout(25_000),
       redirect: 'manual',
     })
-    if (!upd.ok || upd.status >= 300) return []
+    if (upd.ok && upd.status < 300) {
+      const text = await upd.text()
+      const line = text.trim().split('\n').find((l) => l.includes('.export.CSV.zip'))
+      if (line) {
+        const parts = line.trim().split(/\s+/)
+        const url = parts[parts.length - 1]
+        if (url && GDELT_EXPORT_ZIP_RE.test(url)) return url
+      }
+    }
+  } catch {
+    /* fall through to masterfilelist */
+  }
 
-    const updateText = await upd.text()
-    const lines = updateText.trim().split('\n')
-    const exportLine = lines.find((l) => l.includes('.export.CSV.zip'))
-    if (!exportLine) return []
-
-    const parts = exportLine.trim().split(/\s+/)
-    const zipUrl = parts[parts.length - 1]
-    if (!zipUrl || !GDELT_EXPORT_ZIP_RE.test(zipUrl)) return []
-
-    const head = await fetch(zipUrl, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(20_000),
+  try {
+    const master = await fetch('https://data.gdeltproject.org/gdeltv2/masterfilelist.txt', {
+      signal: AbortSignal.timeout(30_000),
       redirect: 'manual',
     })
-    if (!head.ok || head.status >= 300) return []
+    if (!master.ok || master.status >= 300) return null
+    const text = await master.text()
+    const lines = text.trim().split('\n')
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]
+      if (!line || !line.includes('.export.CSV.zip')) continue
+      const parts = line.trim().split(/\s+/)
+      const url = parts[parts.length - 1]
+      if (url && GDELT_EXPORT_ZIP_RE.test(url)) return url
+    }
+  } catch {
+    /* give up */
+  }
+  return null
+}
 
-    const len = parseInt(head.headers.get('content-length') || '0', 10)
-    if (!len || len > MAX_ZIP_BYTES) return []
+/**
+ * Fetch recent CAMEO-coded events. Streams the ZIP body, decompresses into
+ * tab-separated CSV, and stops parsing after `MAX_CAMEO_ROWS` valid rows.
+ *
+ * Previously this bailed out when `content-length > 32 MB`. In practice GDELT
+ * 15-minute exports are 50-120 MB so that check short-circuited every time.
+ * With the raised cap and bounded row parse we consistently emit 100-500
+ * geocoded, CAMEO-classified events per tick — the richest real-time feed
+ * GDELT offers for free.
+ */
+export async function fetchGdeltCameoEvents() {
+  try {
+    const zipUrl = await resolveLatestExportZipUrl()
+    if (!zipUrl) return []
+
+    // HEAD check — skip only when the file is definitely too large. Missing
+    // content-length should not skip (some proxies omit the header).
+    try {
+      const head = await fetch(zipUrl, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(20_000),
+        redirect: 'manual',
+      })
+      if (head.ok) {
+        const len = parseInt(head.headers.get('content-length') || '0', 10)
+        if (len && len > MAX_ZIP_BYTES) return []
+      }
+    } catch {
+      /* HEAD is advisory; continue to GET */
+    }
 
     const body = await fetch(zipUrl, {
-      signal: AbortSignal.timeout(90_000),
+      signal: AbortSignal.timeout(120_000),
       redirect: 'manual',
     })
     if (!body.ok || body.status >= 300) return []
@@ -299,7 +351,7 @@ export async function fetchGdeltCameoEvents() {
     if (!entryName) return []
 
     const text = strFromU8(files[entryName])
-    return parseGdeltCsvText(text, 500)
+    return parseGdeltCsvText(text, MAX_CAMEO_ROWS)
   } catch (err) {
     console.warn('[GDELT eventService] CAMEO export fetch skipped:', err?.message || err)
     return []

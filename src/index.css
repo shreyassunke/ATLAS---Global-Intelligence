@@ -806,8 +806,10 @@ button.atlas-logo-header-btn:focus-visible {
 /* Feed chrome — separate from panel body */
 .feed-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 10px 14px;
   padding: 14px 20px 10px;
   background: rgba(255, 255, 255, 0.035);
   backdrop-filter: blur(12px);
@@ -863,6 +865,112 @@ button.atlas-logo-header-btn:focus-visible {
   color: #fff;
   border-color: rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.04);
+}
+
+.feed-header-search-wrap {
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.feed-search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.feed-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.32);
+}
+
+.feed-search-input:focus {
+  border-color: rgba(100, 180, 255, 0.45);
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.feed-tabs-row {
+  flex-shrink: 0;
+  padding: 0 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  position: relative;
+  z-index: 2;
+}
+
+.feed-tabs-scroll {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.feed-tabs-scroll::-webkit-scrollbar {
+  height: 3px;
+}
+
+.feed-tabs-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}
+
+.feed-tab {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-family: "Courier Prime", "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+
+.feed-tab:hover {
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.feed-tab.active {
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: color-mix(in srgb, var(--feed-tab-accent, #1a90ff) 55%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--feed-tab-accent, #1a90ff) 25%, transparent);
+}
+
+.feed-tab-icon {
+  font-size: 11px;
+  letter-spacing: 0;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.feed-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 28px 16px;
+  text-align: center;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.38);
 }
 
 /* Scrollable area */

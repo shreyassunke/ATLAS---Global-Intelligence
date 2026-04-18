@@ -211,8 +211,6 @@ export default function GlobeGLView({ onGlobeReady }) {
     const animFrameRef = useRef(null)
     const lastZoomStoreEmitRef = useRef(0)
 
-    const newsItems = useAtlasStore((s) => s.newsItems)
-    const activeCategories = useAtlasStore((s) => s.activeCategories)
     const events = useAtlasStore((s) => s.events)
     const dataLayers = useAtlasStore((s) => s.dataLayers)
     const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
@@ -227,15 +225,13 @@ export default function GlobeGLView({ onGlobeReady }) {
     const heatOn = dataLayers?.gdeltHeatmap !== false
     const choroOn = dataLayers?.gdeltChoropleth === true
 
-    /** Map event source IDs to data layer keys */
+    /** Globe only: GDELT + NASA EONET / FIRMS (see `eventSourceToGlobeDataLayerKey`). */
     const sourceToLayer = useCallback((source) => {
         const s = (source || '').toLowerCase()
         if (s.includes('gdelt')) return 'gdelt'
-        if (s.includes('firms') || s.includes('fire')) return 'firms'
-        if (s.includes('usgs') || s.includes('earthquake')) return 'usgs'
-        if (s.includes('gdacs')) return 'gdacs'
+        if (s.includes('firms')) return 'firms'
         if (s.includes('eonet')) return 'eonet'
-        return null // other sources always visible
+        return null
     }, [])
 
     /** Get event marker color by priority */
@@ -250,8 +246,6 @@ export default function GlobeGLView({ onGlobeReady }) {
     }, [])
 
     const getVisibleItems = useCallback(() => {
-        // Standard news items are no longer plotted on the globe per user request.
-        // The globe is reserved exclusively for intelligence and GDELT database records.
         const newsVisible = []
 
         // EventBus events (filtered by data layers and valid coords)
@@ -259,7 +253,7 @@ export default function GlobeGLView({ onGlobeReady }) {
             .filter((evt) => {
                 if (!evt.lat || !evt.lng || (evt.lat === 0 && evt.lng === 0 && evt.latApproximate)) return false
                 const layerKey = sourceToLayer(evt.source)
-                if (layerKey && dataLayers[layerKey] === false) return false
+                if (!layerKey || dataLayers[layerKey] === false) return false
                 return true
             })
             .map((evt) => ({
@@ -273,7 +267,7 @@ export default function GlobeGLView({ onGlobeReady }) {
             }))
 
         return [...newsVisible, ...eventVisible]
-    }, [newsItems, activeCategories, events, dataLayers, sourceToLayer, getEventColor, getEventRadius])
+    }, [events, dataLayers, sourceToLayer, getEventColor, getEventRadius])
 
     // ── Initialise globe once ──
     useEffect(() => {
@@ -602,7 +596,6 @@ export default function GlobeGLView({ onGlobeReady }) {
             if (onGlobeReadyRef.current) onGlobeReadyRef.current()
             // After globe init, force data sync from current store
             setTimeout(() => {
-                const { events, newsItems } = useAtlasStore.getState()
                 const visible = getVisibleItems()
                 globe.pointsData(visible)
             }, 500)
@@ -645,12 +638,11 @@ export default function GlobeGLView({ onGlobeReady }) {
         if (!globe) return
         const visible = getVisibleItems()
         globe.pointsData(visible)
-        // Rings: prioritize high-severity events, then news
         const ringItems = visible
             .sort((a, b) => (b.severity || 0) - (a.severity || 0))
             .slice(0, isMobile ? 15 : 80)
         globe.ringsData(ringItems)
-    }, [newsItems, activeCategories, events, dataLayers, getVisibleItems])
+    }, [events, dataLayers, getVisibleItems, isMobile])
 
     // ── GDELT heatmap data sync ──
     useEffect(() => {

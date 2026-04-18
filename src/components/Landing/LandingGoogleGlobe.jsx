@@ -247,6 +247,9 @@ function InnerLandingMap() {
         ref={map3dRef}
         mode={MapMode.HYBRID}
         defaultUIHidden
+        // Suppress Google's baked-in POI dots / labels on the 3D tile layer
+        // so only Atlas's own landing markers are visible.
+        defaultLabelsDisabled
         defaultCenter={viewCenter}
         defaultRange={reduceMotion ? RANGE_INTRO_TO_M : RANGE_INTRO_FROM_M}
         defaultTilt={LANDING_TILT}

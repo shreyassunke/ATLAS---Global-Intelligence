@@ -6,7 +6,6 @@ import React, {
   useEffect,
   useMemo,
   useRef,
-  useState,
 } from 'react'
 import {
   APIProvider,
@@ -20,8 +19,7 @@ import {
 
 import { useAtlasStore } from '../../store/atlasStore'
 import { requestSnapshot } from '../../core/eventBus'
-import { getCategoryColor } from '../../utils/categoryColors'
-import { getRegionKey, getTimezoneViewCenter } from '../../utils/geo'
+import { getTimezoneViewCenter } from '../../utils/geo'
 import { detectQualityTier } from '../../config/qualityTiers'
 import { DIMENSION_COLORS } from '../../core/eventSchema'
 import { generateSprite, getAnimationState, getSeveritySize } from '../../core/visualGrammar'
@@ -29,6 +27,7 @@ import {
   NUCLEAR_FACILITIES,
   SUBMARINE_CABLE_PATHS,
   clusterEvents,
+  eventSourceToGlobeDataLayerKey,
 } from '../../core/globeLayers'
 import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
 import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
@@ -36,8 +35,6 @@ import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
 
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
-const ZOOMED_OUT_RANGE_M = 14_000_000
-const MAX_PER_REGION_ZOOMED_OUT = 2
 const RANGE_MIN_M = 120
 const RANGE_MAX_M = 35_000_000
 /** Min interval between zoom writes to the global store while the camera moves (keeps UI off the critical path). */
@@ -49,84 +46,18 @@ const INTRO_DURATION_MS = 3000
 /** 0 = top-down (nadir), matching the in-app “globe disk” overview reference. */
 const STARTUP_ORBIT_TILT = 0
 
-const NEWS_SPRITE_SIZE = 48
-const NEWS_MARKER_PX = 20
-const _newsSpriteCache = new Map()
-const _newsDataUrlCache = new Map()
-
-function makeNewsSpriteKey(cssColor, isVideo) {
-  return `${cssColor}_${isVideo ? 'v' : 'a'}`
-}
-
-function generateNewsSprite(cssColor, isVideo) {
-  const key = makeNewsSpriteKey(cssColor, isVideo)
-  if (_newsSpriteCache.has(key)) return _newsSpriteCache.get(key)
-  const s = NEWS_SPRITE_SIZE
-  const h = s / 2
-  const c = document.createElement('canvas')
-  c.width = s
-  c.height = s
-  const ctx = c.getContext('2d')
-
-  if (isVideo) {
-    const r = h - 4
-    const rx = h - r
-    const ry = h - r * 0.75
-    const rw = r * 2
-    const rh = r * 1.5
-    const rad = 4
-    ctx.beginPath()
-    ctx.moveTo(rx + rad, ry)
-    ctx.lineTo(rx + rw - rad, ry)
-    ctx.quadraticCurveTo(rx + rw, ry, rx + rw, ry + rad)
-    ctx.lineTo(rx + rw, ry + rh - rad)
-    ctx.quadraticCurveTo(rx + rw, ry + rh, rx + rw - rad, ry + rh)
-    ctx.lineTo(rx + rad, ry + rh)
-    ctx.quadraticCurveTo(rx, ry + rh, rx, ry + rh - rad)
-    ctx.lineTo(rx, ry + rad)
-    ctx.quadraticCurveTo(rx, ry, rx + rad, ry)
-    ctx.closePath()
-    ctx.fillStyle = cssColor
-    ctx.globalAlpha = 0.85
-    ctx.fill()
-    ctx.globalAlpha = 1
-    const triH = r * 0.6
-    ctx.beginPath()
-    ctx.moveTo(h - triH * 0.35, h - triH * 0.5)
-    ctx.lineTo(h + triH * 0.55, h)
-    ctx.lineTo(h - triH * 0.35, h + triH * 0.5)
-    ctx.closePath()
-    ctx.fillStyle = '#fff'
-    ctx.fill()
-  } else {
-    ctx.beginPath()
-    ctx.arc(h, h, h - 4, 0, Math.PI * 2)
-    ctx.fillStyle = cssColor
-    ctx.globalAlpha = 0.8
-    ctx.fill()
-    ctx.globalAlpha = 1
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 1.6
-    ctx.lineCap = 'round'
-    for (let i = -1; i <= 1; i++) {
-      const y = h + i * 4.5
-      ctx.beginPath()
-      ctx.moveTo(h - 7, y)
-      ctx.lineTo(h + 7, y)
-      ctx.stroke()
-    }
-  }
-  _newsSpriteCache.set(key, c)
-  return c
-}
-
-function newsSpriteDataUrl(cssColor, isVideo) {
-  const key = makeNewsSpriteKey(cssColor, isVideo)
-  if (_newsDataUrlCache.has(key)) return _newsDataUrlCache.get(key)
-  const canvas = generateNewsSprite(cssColor, isVideo)
-  const url = canvas.toDataURL('image/png')
-  _newsDataUrlCache.set(key, url)
-  return url
+/**
+ * Max event age (ms) to plot on the globe for each HUD `timeFilter` tier.
+ * Without this, events linger until their TTL expires (up to 24h for some
+ * sources) and the globe ends up littered with stale single-dot markers.
+ * `live` intentionally matches the "pulsing" recency window (2h) so the
+ * globe reflects what the user reads as *live*, not a rolling 24h window.
+ */
+const TIME_FILTER_MAX_AGE_MS = {
+  live: 2 * 3600_000,
+  '24h': 24 * 3600_000,
+  '7d': 7 * 24 * 3600_000,
+  '30d': 30 * 24 * 3600_000,
 }
 
 function convexHull(points) {
@@ -144,23 +75,6 @@ function convexHull(points) {
     upper.push(p)
   }
   return [...lower.slice(0, -1), ...upper.slice(0, -1)]
-}
-
-function haversineKm(lat1, lng1, lat2, lng2) {
-  const R = 6371
-  const toRad = (d) => (d * Math.PI) / 180
-  const dLat = toRad(lat2 - lat1)
-  const dLng = toRad(lng2 - lng1)
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-}
-
-function approxInView(centerLat, centerLng, rangeM, lat, lng) {
-  const dKm = haversineKm(centerLat, centerLng, lat, lng)
-  const radiusKm = Math.min(6000, Math.max(120, (rangeM / 1_000_000) * 1400))
-  return dKm <= radiusKm
 }
 
 function readMap3dCenterLiteral(center) {
@@ -444,7 +358,6 @@ function InnerMap({ onGlobeReady }) {
   const idleSpinGateRef = useRef(false)
   const spinRafRef = useRef(null)
   const spriteCacheRef = useRef(new Map())
-  const [visibilityEpoch, setVisibilityEpoch] = useState(0)
 
   const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
   const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
@@ -452,73 +365,44 @@ function InnerMap({ onGlobeReady }) {
   const setHoveredMarker = useAtlasStore((s) => s.setHoveredMarker)
   const openStreetView = useAtlasStore((s) => s.openStreetView)
 
-  const newsItems = useAtlasStore((s) => s.newsItems)
   const events = useAtlasStore((s) => s.events)
-  const activeCategories = useAtlasStore((s) => s.activeCategories)
+  const dataLayers = useAtlasStore((s) => s.dataLayers)
   const activeDimensions = useAtlasStore((s) => s.activeDimensions)
   const priorityFilter = useAtlasStore((s) => s.priorityFilter)
+  const timeFilter = useAtlasStore((s) => s.timeFilter)
   const resolvedTier = useAtlasStore((s) => s.resolvedTier)
   const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
 
-  const maxMarkers = useMemo(
-    () => useAtlasStore.getState().getEffectiveSetting('maxMarkers') ?? 300,
-    [resolvedTier, qualityOverrides],
-  )
-
-  const visibleNewsIds = useMemo(() => {
-    const filtered = newsItems.filter(
-      (item) => activeCategories.has(item.category) && item.lat != null && item.lng != null,
-    )
-    const cam = cameraRef.current
-    const range = cam.range ?? STARTUP_ORBIT_RANGE_M
-    const center = cam.center || defaultCenter
-
-    let pool = filtered
-    if (range > ZOOMED_OUT_RANGE_M) {
-      const byRegion = {}
-      for (const item of filtered) {
-        const key = getRegionKey(item.lat, item.lng)
-        if (!byRegion[key]) byRegion[key] = []
-        byRegion[key].push(item)
-      }
-      const topIds = new Set()
-      for (const regionItems of Object.values(byRegion)) {
-        regionItems
-          .sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0))
-          .slice(0, MAX_PER_REGION_ZOOMED_OUT)
-          .forEach((item) => topIds.add(item.id))
-      }
-      pool = filtered.filter((i) => topIds.has(i.id))
-    } else {
-      pool = filtered.filter((item) =>
-        approxInView(center.lat, center.lng, range, item.lat, item.lng),
-      )
-    }
-
-    const sorted = [...pool].sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0))
-    return new Set(sorted.slice(0, maxMarkers).map((i) => i.id))
-  }, [
-    newsItems,
-    activeCategories,
-    maxMarkers,
-    defaultCenter,
-    visibilityEpoch,
-  ])
-
-  const filteredEvents = useMemo(() => {
+  const globePlottedEvents = useMemo(() => {
     const list = []
+    let noCoord = 0, noLayer = 0, layerOff = 0, dimOff = 0, prioOff = 0, tooOld = 0
+    const maxAgeMs = TIME_FILTER_MAX_AGE_MS[timeFilter] ?? TIME_FILTER_MAX_AGE_MS.live
+    const now = Date.now()
     for (const evt of events) {
-      if (evt.lat == null || evt.lng == null) continue
-      if (!activeDimensions.has(evt.dimension)) continue
-      if (priorityFilter === 'p1' && evt.priority !== 'p1') continue
-      if (priorityFilter === 'p1p2' && evt.priority === 'p3') continue
+      if (evt.lat == null || evt.lng == null) { noCoord++; continue }
+      const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
+      if (!layerKey) { noLayer++; continue }
+      if (dataLayers[layerKey] === false) { layerOff++; continue }
+      if (!activeDimensions.has(evt.dimension)) { dimOff++; continue }
+      if (priorityFilter === 'p1' && evt.priority !== 'p1') { prioOff++; continue }
+      if (priorityFilter === 'p1p2' && evt.priority === 'p3') { prioOff++; continue }
+      // Drop markers older than the HUD time window so the globe reflects the
+      // selected tier (Live / 24h / 7d / 30d) instead of the raw TTL buffer.
+      const tsMs = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
+      const refMs = Number.isFinite(tsMs)
+        ? tsMs
+        : (evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN)
+      if (Number.isFinite(refMs) && now - refMs > maxAgeMs) { tooOld++; continue }
       list.push(evt)
     }
+    // #region agent log
+    try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'GoogleGlobe.jsx:globePlottedEvents',message:'L5 plotted events memo',data:{inputEvents:events.length,plotted:list.length,filteredOut:{noCoord,noLayer,layerOff,dimOff,prioOff,tooOld},activeDimensions:Array.from(activeDimensions||[]),priorityFilter,timeFilter,dataLayers,firstEventSource:events[0]?.source||null,firstEventDim:events[0]?.dimension||null},hypothesisId:'H4',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
+    // #endregion
     return list
-  }, [events, activeDimensions, priorityFilter])
+  }, [events, dataLayers, activeDimensions, priorityFilter, timeFilter])
 
   const clusterLayers = useMemo(() => {
-    const clusters = clusterEvents(events, 200, 5)
+    const clusters = clusterEvents(globePlottedEvents, 200, 5)
     return clusters.map((cluster) => {
       const dimensionColor = DIMENSION_COLORS[cluster.dimension] || '#1a90ff'
       const points = cluster.events.map((e) => [e.lng, e.lat])
@@ -535,7 +419,7 @@ function InnerMap({ onGlobeReady }) {
         strokeColorHex: dimensionColor,
       }
     }).filter(Boolean)
-  }, [events])
+  }, [globePlottedEvents])
 
   const getSprite = useCallback((priority, dimension) => {
     const key = `${priority}_${dimension}`
@@ -574,10 +458,6 @@ function InnerMap({ onGlobeReady }) {
         }
       }
 
-      // Marker visibility reads `cameraRef` inside `visibleNewsIds` — recomputing that graph on
-      // every camera tick (or even a 150ms throttle) blocks the main thread during drags.
-      // Refresh when the map reports steady instead; see `onSteadyChange`.
-
       resetIdleTimer()
     },
     [resetIdleTimer, setZoomLevel],
@@ -615,17 +495,6 @@ function InnerMap({ onGlobeReady }) {
       openStreetView({ lat: ll.lat, lng: ll.lng, source: 'globe' })
     },
     [openStreetView, setSelectedEvent, setSelectedMarker],
-  )
-
-  const onNewsClick = useCallback(
-    (e, item) => {
-      e?.stopPropagation?.()
-      e?.preventDefault?.()
-      setSelectedMarker(item)
-      setSelectedEvent(null)
-      flyToLngLat(item.lat, item.lng, 0.4)
-    },
-    [flyToLngLat, setSelectedEvent, setSelectedMarker],
   )
 
   const onEventClick = useCallback(
@@ -823,9 +692,6 @@ function InnerMap({ onGlobeReady }) {
   const onSteadyChange = useCallback(
     (ev) => {
       if (!ev.detail?.isSteady) return
-      startTransition(() => {
-        setVisibilityEpoch((n) => n + 1)
-      })
       finalizeReady()
     },
     [finalizeReady],
@@ -836,14 +702,6 @@ function InnerMap({ onGlobeReady }) {
     return () => clearTimeout(t)
   }, [finalizeReady])
 
-  const newsMarkers = useMemo(() => {
-    const filtered = newsItems.filter(
-      (item) => activeCategories.has(item.category) && item.lat != null && item.lng != null,
-    )
-    return filtered.filter((item) => visibleNewsIds.has(item.id))
-  }, [newsItems, activeCategories, visibleNewsIds])
-
-  const dataLayers = useAtlasStore((s) => s.dataLayers)
   const heatOn = dataLayers?.gdeltHeatmap !== false
   const choroOn = dataLayers?.gdeltChoropleth === true
 
@@ -895,6 +753,11 @@ function InnerMap({ onGlobeReady }) {
         ref={map3dRef}
         mode={MapMode.HYBRID}
         defaultUIHidden
+        // Suppress Google's baked-in POI dots / labels on the 3D tile layer.
+        // Without this, HYBRID mode draws small non-interactive city /
+        // landmark dots everywhere — users read them as stale Atlas markers
+        // even though they're part of Google's base map.
+        defaultLabelsDisabled
         defaultCenter={defaultCenter}
         defaultRange={STARTUP_ORBIT_RANGE_M}
         defaultTilt={STARTUP_ORBIT_TILT}
@@ -1007,35 +870,7 @@ function InnerMap({ onGlobeReady }) {
           </Marker3D>
         ))}
 
-        {newsMarkers.map((item) => {
-          const cssColor = getCategoryColor(item.category)
-          const src = newsSpriteDataUrl(cssColor, item.mediaType === 'video')
-          return (
-            <Marker3D
-              key={item.id}
-              position={{ lat: item.lat, lng: item.lng, altitude: 1200 }}
-              altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
-              drawsWhenOccluded
-              sizePreserved
-              collisionBehavior={CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY}
-              title={item.title}
-              onClick={(e) => onNewsClick(e, item)}
-            >
-              <img
-                src={src}
-                width={NEWS_MARKER_PX}
-                height={NEWS_MARKER_PX}
-                alt=""
-                className="atlas-globe-dot-pulse"
-                style={{ opacity: 0.92 }}
-                onMouseEnter={() => setPointerHover(item, false)}
-                onMouseLeave={() => setHoveredMarker(null)}
-              />
-            </Marker3D>
-          )
-        })}
-
-        {filteredEvents.map((evt, idx) => {
+        {globePlottedEvents.map((evt, idx) => {
           const sprite = getSprite(evt.priority, evt.dimension)
           const size = getSeveritySize(evt.severity)
           const anim = getAnimationState(evt.timestamp)

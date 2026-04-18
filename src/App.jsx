@@ -19,6 +19,7 @@ import StreetViewOverlay from './components/UI/StreetViewOverlay'
 import YouTubeEmbedOverlay from './components/UI/YouTubeEmbedOverlay'
 import SettingsPanel from './components/UI/SettingsPanel'
 import DimensionFilters from './components/UI/DimensionFilters'
+import FetchStatusOverlay from './components/UI/FetchStatusOverlay'
 import { usePreferencesSync } from './hooks/usePreferencesSync'
 import LandingPage from './components/Landing/LandingPage'
 
@@ -254,6 +255,7 @@ export default function App() {
                   <HoverLabel />
                   <LiveTicker />
                   <SettingsPanel />
+                  <FetchStatusOverlay />
                 </motion.div>
               )}
             </AnimatePresence>

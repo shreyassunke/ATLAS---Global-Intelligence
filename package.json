@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "vercel dev --listen 3001",
     "build": "vite build",
+    "prebuild:gdelt-lookups": "node scripts/build-gdelt-lookups.mjs",
     "preview": "vite preview",
     "deploy": "npx vercel --prod",
     "deploy:preview": "npx vercel"

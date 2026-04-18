@@ -235,6 +235,216 @@ export const TEMPLATES = {
       maxRows: limit,
     }
   },
+
+  /**
+   * How a single story spreads — per-mention cadence (15-min buckets) for a
+   * specific GlobalEventID over the last N days, joined to the event row so
+   * we get location + CAMEO context alongside the timeline.
+   */
+  mentionsProgression: (input) => {
+    const globalEventId = Number.isFinite(Number(input?.globalEventId))
+      ? Math.floor(Number(input.globalEventId))
+      : null
+    if (globalEventId == null || globalEventId <= 0) {
+      throw new Error(`Param 'globalEventId' must be a positive integer`)
+    }
+    const days = clampMonths(input?.days, 14, 1, 60)
+    const limit = clampLimit(input?.limit, 500)
+    const sql = `
+      SELECT
+        TIMESTAMP_TRUNC(TIMESTAMP(PARSE_DATETIME('%Y%m%d%H%M%S', CAST(MentionTimeDate AS STRING))), HOUR) AS bucket,
+        COUNT(*)               AS mentions,
+        AVG(MentionDocTone)    AS avgTone,
+        COUNT(DISTINCT MentionSourceName) AS distinctOutlets
+      FROM \`gdelt-bq.gdeltv2.eventmentions_partitioned\`
+      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+        AND GLOBALEVENTID = @globalEventId
+      GROUP BY bucket
+      ORDER BY bucket
+      LIMIT @limit
+    `
+    return {
+      query: sql,
+      params: { globalEventId, days, limit },
+      types: { globalEventId: 'INT64', days: 'INT64', limit: 'INT64' },
+      maxRows: limit,
+    }
+  },
+
+  /**
+   * CAMEO QuadClass breakdown per country — counts of (1) Verbal Coop,
+   * (2) Material Coop, (3) Verbal Conflict, (4) Material Conflict over the
+   * last N months. Feeds stacked bar charts and country cards.
+   */
+  quadClassBreakdown: (input) => {
+    const months = clampMonths(input?.months, 6, 1, 120)
+    const country = input?.country ? requireString(input.country, 'country', 3).toUpperCase() : null
+    const limit = clampLimit(input?.limit, 250)
+    const sql = `
+      SELECT
+        ActionGeo_CountryCode AS country,
+        QuadClass,
+        COUNT(*) AS events,
+        SUM(NumMentions) AS mentions,
+        AVG(GoldsteinScale) AS avgGoldstein
+      FROM \`gdelt-bq.gdeltv2.events_partitioned\`
+      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+        AND ActionGeo_CountryCode IS NOT NULL
+        AND QuadClass BETWEEN 1 AND 4
+        ${country ? 'AND ActionGeo_CountryCode = @country' : ''}
+      GROUP BY country, QuadClass
+      ORDER BY country, QuadClass
+      LIMIT @limit
+    `
+    return {
+      query: sql,
+      params: { months, limit, ...(country ? { country } : {}) },
+      types: { months: 'INT64', limit: 'INT64', ...(country ? { country: 'STRING' } : {}) },
+      maxRows: limit,
+    }
+  },
+
+  /**
+   * Top Cloud Vision labels from the Visual Global Knowledge Graph for a
+   * theme token (and optional country). Powers the "Imagery" analytics card.
+   *
+   * VGKG table documented at
+   *   http://data.gdeltproject.org/documentation/GDELT-Global_Visual_Knowledge_Graph_(GVKG)_Codebook.pdf
+   */
+  visualGkgLabels: (input) => {
+    const theme = requireString(input?.theme, 'theme', 96).toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+    const months = clampMonths(input?.months, 3, 1, 24)
+    const country = input?.country ? requireString(input.country, 'country', 3).toUpperCase() : null
+    const limit = clampLimit(input?.limit, 60)
+    const sql = `
+      SELECT
+        label,
+        COUNT(*) AS occurrences,
+        AVG(confidence) AS avgConfidence,
+        ANY_VALUE(DocumentIdentifier) AS exampleUrl
+      FROM (
+        SELECT
+          TRIM(SPLIT(entry, ',')[SAFE_OFFSET(0)]) AS label,
+          SAFE_CAST(SPLIT(entry, ',')[SAFE_OFFSET(1)] AS FLOAT64) AS confidence,
+          DocumentIdentifier,
+          V2Themes,
+          V2LocationsCountryCode
+        FROM \`gdelt-bq.gdeltv2.vgkg_partitioned\`,
+          UNNEST(SPLIT(COALESCE(ImgLabels, ''), ';')) AS entry
+        WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+          AND STRPOS(UPPER(COALESCE(V2Themes, '')), @theme) > 0
+      )
+      WHERE label IS NOT NULL AND label != ''
+        ${country ? 'AND STRPOS(UPPER(COALESCE(V2LocationsCountryCode, \'\')), @country) > 0' : ''}
+      GROUP BY label
+      ORDER BY occurrences DESC
+      LIMIT @limit
+    `
+    return {
+      query: sql,
+      params: { theme, months, limit, ...(country ? { country } : {}) },
+      types: { theme: 'STRING', months: 'INT64', limit: 'INT64', ...(country ? { country: 'STRING' } : {}) },
+      maxRows: limit,
+    }
+  },
+
+  /**
+   * Top GCAM emotion codes for a theme. V2GCAM is a comma-separated list of
+   * `codebook.dimension:value` tokens — we split, average the numeric
+   * dimension values, and return the top-K so the radar chart stays legible.
+   */
+  gcamEmotions: (input) => {
+    const theme = requireString(input?.theme, 'theme', 96).toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+    const months = clampMonths(input?.months, 3, 1, 24)
+    const limit = clampLimit(input?.limit, 40)
+    const sql = `
+      SELECT
+        code,
+        AVG(value) AS avgValue,
+        COUNT(*)   AS samples
+      FROM (
+        SELECT
+          SPLIT(token, ':')[SAFE_OFFSET(0)] AS code,
+          SAFE_CAST(SPLIT(token, ':')[SAFE_OFFSET(1)] AS FLOAT64) AS value
+        FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`,
+          UNNEST(SPLIT(COALESCE(V2GCAM, ''), ',')) AS token
+        WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+          AND STRPOS(UPPER(COALESCE(V2Themes, '')), @theme) > 0
+      )
+      WHERE code IS NOT NULL
+        AND code != ''
+        AND STARTS_WITH(code, 'v')
+        AND value IS NOT NULL
+      GROUP BY code
+      ORDER BY samples DESC
+      LIMIT @limit
+    `
+    return {
+      query: sql,
+      params: { theme, months, limit },
+      types: { theme: 'STRING', months: 'INT64', limit: 'INT64' },
+      maxRows: limit,
+    }
+  },
+
+  /**
+   * Co-citation network: which news outlets publish the same GKG theme. The
+   * client can render this as a force graph alongside the actor network.
+   */
+  sourceDomainNetwork: (input) => {
+    const theme = requireString(input?.theme, 'theme', 96).toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+    const months = clampMonths(input?.months, 3, 1, 24)
+    const limit = clampLimit(input?.limit, 150)
+    const sql = `
+      SELECT
+        SourceCommonName AS source,
+        COUNT(*) AS documents,
+        AVG(SAFE_CAST(SPLIT(V2Tone, ',')[SAFE_OFFSET(0)] AS FLOAT64)) AS avgTone,
+        COUNT(DISTINCT DATE(_PARTITIONTIME)) AS activeDays
+      FROM \`gdelt-bq.gdeltv2.gkg_partitioned\`
+      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+        AND STRPOS(UPPER(COALESCE(V2Themes, '')), @theme) > 0
+        AND SourceCommonName IS NOT NULL
+      GROUP BY source
+      ORDER BY documents DESC
+      LIMIT @limit
+    `
+    return {
+      query: sql,
+      params: { theme, months, limit },
+      types: { theme: 'STRING', months: 'INT64', limit: 'INT64' },
+      maxRows: limit,
+    }
+  },
+
+  /**
+   * Long-range TV timeline from the Internet Archive TV News Archive
+   * (`gdelt-bq.gdeltv2.iatv`). The public HTTP TV API caps at ~1y; BigQuery
+   * lets us trend a keyword across the full archive (2009 → today).
+   */
+  tvTimeline: (input) => {
+    const keyword = requireString(input?.keyword, 'keyword', 96)
+    const months = clampMonths(input?.months, 24, 1, 360)
+    const limit = clampLimit(input?.limit, MAX_LIMIT)
+    const sql = `
+      SELECT
+        FORMAT_DATE('%Y%m', DATE(_PARTITIONTIME)) AS month,
+        COUNT(*) AS mentions,
+        COUNT(DISTINCT station) AS distinctStations
+      FROM \`gdelt-bq.gdeltv2.iatv\`
+      WHERE _PARTITIONTIME >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @months MONTH)
+        AND REGEXP_CONTAINS(LOWER(snippet), LOWER(@keyword))
+      GROUP BY month
+      ORDER BY month
+      LIMIT @limit
+    `
+    return {
+      query: sql,
+      params: { keyword, months, limit },
+      types: { keyword: 'STRING', months: 'INT64', limit: 'INT64' },
+      maxRows: limit,
+    }
+  },
 }
 
 export function resolveTemplate(name, params) {

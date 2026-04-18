@@ -38,6 +38,19 @@ export const GLOBE_OVERLAY_LAYER_KEYS = {
 }
 
 /**
+ * Globe pins (Map3D / Globe.GL / FlatMap) are limited to GDELT and NASA natural / satellite
+ * feeds (EONET, FIRMS). Commercial news API items use the dock feed only.
+ * @returns {'gdelt'|'eonet'|'firms'|null}
+ */
+export function eventSourceToGlobeDataLayerKey(source) {
+  const s = (source || '').toLowerCase()
+  if (s.includes('gdelt')) return 'gdelt'
+  if (s.includes('eonet')) return 'eonet'
+  if (s.includes('firms')) return 'firms'
+  return null
+}
+
+/**
  * Closed ring of lat/lng/alt samples around a point (for Map3D polygon “blobs”).
  * @param {number} radiusDeg approximate angular radius in degrees
  */

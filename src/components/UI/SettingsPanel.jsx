@@ -27,7 +27,6 @@ const DATA_LAYER_TOGGLES = [
     { key: 'usgs', label: 'USGS Earthquakes', icon: '🌋', desc: 'Real-time seismic activity worldwide' },
     { key: 'gdacs', label: 'GDACS Disasters', icon: '🌊', desc: 'Global disaster alerts & coordination' },
     { key: 'eonet', label: 'NASA EONET', icon: '🛰', desc: 'Earth Observatory natural events' },
-    { key: 'news', label: 'News Articles', icon: '📰', desc: 'Commercial news API articles on globe' },
 ]
 
 export default function SettingsPanel() {
@@ -141,7 +140,7 @@ export default function SettingsPanel() {
                             })}
                         </div>
                         <div className="settings-hint">
-                            Toggle data layers on the globe. Data provided by the GDELT Project, NASA, and USGS.
+                            Globe pins: GDELT plus NASA EONET / FIRMS when enabled. Other signals stay in the feed. Data from GDELT, NASA, USGS, and partners.
                         </div>
                     </div>
 
