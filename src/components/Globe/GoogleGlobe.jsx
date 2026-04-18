@@ -26,11 +26,13 @@ import { detectQualityTier } from '../../config/qualityTiers'
 import { DIMENSION_COLORS } from '../../core/eventSchema'
 import { generateSprite, getAnimationState, getSeveritySize } from '../../core/visualGrammar'
 import {
-  MARITIME_CHOKEPOINTS,
   NUCLEAR_FACILITIES,
   SUBMARINE_CABLE_PATHS,
   clusterEvents,
 } from '../../core/globeLayers'
+import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
+import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
+import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
 
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || ''
 
@@ -161,19 +163,152 @@ function approxInView(centerLat, centerLng, rangeM, lat, lng) {
   return dKm <= radiusKm
 }
 
-function chokepointDiamondDataUrl() {
+function readMap3dCenterLiteral(center) {
+  if (!center) return null
+  const lat = typeof center.lat === 'function' ? center.lat() : center.lat
+  const lng = typeof center.lng === 'function' ? center.lng() : center.lng
+  const altitude =
+    typeof center.altitude === 'function' ? center.altitude() : center.altitude ?? 0
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  return { lat, lng, altitude: Number.isFinite(altitude) ? altitude : 0 }
+}
+
+function wrapLng180(lng) {
+  let x = lng
+  while (x > 180) x -= 360
+  while (x < -180) x += 360
+  return x
+}
+
+/**
+ * Google Earth–style shortcuts on Map3DElement: arrows pan, +/- zoom,
+ * Shift+arrows rotate heading / tilt. Returns true if the key was handled.
+ */
+function applyMap3dKeyboardShortcuts(ev, mapEl, rangeMinM, rangeMaxM) {
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return false
+
+  const { key, code } = ev
+  const isArrow =
+    key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown'
+  const zoomIn =
+    key === '+' || key === '=' || code === 'NumpadAdd' || code === 'Equal'
+  const zoomOut =
+    key === '-' || key === '_' || code === 'NumpadSubtract' || code === 'Minus'
+
+  if (!isArrow && !zoomIn && !zoomOut) return false
+
+  const c0 = readMap3dCenterLiteral(mapEl.center)
+  if (!c0) return false
+
+  let range = Number(mapEl.range)
+  if (!Number.isFinite(range) || range <= 0) return false
+  range = Math.max(rangeMinM, Math.min(rangeMaxM, range))
+
+  if (zoomIn || zoomOut) {
+    const factor = zoomIn ? 0.88 : 1 / 0.88
+    mapEl.range = Math.max(rangeMinM, Math.min(rangeMaxM, range * factor))
+    return true
+  }
+
+  const { lat, lng, altitude } = c0
+  const baseDeg = Math.max(0.04, Math.min(3.2, (range / 9e6) * 0.35))
+  const cosLat = Math.max(0.2, Math.abs(Math.cos((lat * Math.PI) / 180)))
+  const dLng = baseDeg / cosLat
+
+  if (ev.shiftKey) {
+    const rotStep = Math.max(2.5, Math.min(12, (range / 12e6) * 8 + 2))
+    const tiltStep = Math.max(2, Math.min(10, (range / 15e6) * 6 + 2))
+    let heading = Number(mapEl.heading)
+    if (!Number.isFinite(heading)) heading = 0
+    let tilt = Number(mapEl.tilt)
+    if (!Number.isFinite(tilt)) tilt = 0
+
+    if (key === 'ArrowLeft') mapEl.heading = (heading - rotStep + 360) % 360
+    else if (key === 'ArrowRight') mapEl.heading = (heading + rotStep) % 360
+    else if (key === 'ArrowUp') mapEl.tilt = Math.min(90, tilt + tiltStep)
+    else if (key === 'ArrowDown') mapEl.tilt = Math.max(0, tilt - tiltStep)
+    else return false
+    return true
+  }
+
+  let nlat = lat
+  let nlng = lng
+  if (key === 'ArrowLeft') nlng = wrapLng180(lng - dLng)
+  else if (key === 'ArrowRight') nlng = wrapLng180(lng + dLng)
+  else if (key === 'ArrowUp') nlat = Math.min(85, lat + baseDeg)
+  else if (key === 'ArrowDown') nlat = Math.max(-85, lat - baseDeg)
+  else return false
+
+  mapEl.center = { lat: nlat, lng: nlng, altitude }
+  return true
+}
+
+const _heatSpriteCache = new Map()
+function heatSpriteDataUrl(alphaBin) {
+  const key = `h_${alphaBin}`
+  if (_heatSpriteCache.has(key)) return _heatSpriteCache.get(key)
+  const s = 96
+  const h = s / 2
   const c = document.createElement('canvas')
-  c.width = 24
-  c.height = 24
+  c.width = s
+  c.height = s
   const ctx = c.getContext('2d')
-  ctx.translate(12, 12)
-  ctx.rotate(Math.PI / 4)
-  ctx.fillStyle = 'rgba(255,255,255,0.8)'
-  ctx.fillRect(-6, -6, 12, 12)
-  ctx.strokeStyle = 'rgba(255,255,255,0.4)'
-  ctx.lineWidth = 1
-  ctx.strokeRect(-6, -6, 12, 12)
-  return c.toDataURL('image/png')
+  const g = ctx.createRadialGradient(h, h, 0, h, h, h)
+  const peak = Math.max(0.18, Math.min(0.9, alphaBin))
+  g.addColorStop(0, `rgba(255, 60, 60, ${peak})`)
+  g.addColorStop(0.35, `rgba(255, 180, 50, ${peak * 0.55})`)
+  g.addColorStop(0.7, `rgba(255, 240, 120, ${peak * 0.22})`)
+  g.addColorStop(1, 'rgba(255, 240, 120, 0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, s, s)
+  const url = c.toDataURL('image/png')
+  _heatSpriteCache.set(key, url)
+  return url
+}
+
+/** Bin heatmap points into ~1.5° cells so the 3D globe renders ≤400 markers. */
+function bucketHeatPoints(points, cellDeg = 1.5) {
+  if (!Array.isArray(points) || points.length === 0) return []
+  const bins = new Map()
+  for (const p of points) {
+    if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue
+    const ix = Math.round(p.lat / cellDeg)
+    const iy = Math.round(p.lng / cellDeg)
+    const k = `${ix}|${iy}`
+    const prev = bins.get(k)
+    if (prev) {
+      prev.w += p.weight || 1
+      prev.n += 1
+    } else {
+      bins.set(k, { lat: ix * cellDeg, lng: iy * cellDeg, w: p.weight || 1, n: 1 })
+    }
+  }
+  const out = [...bins.values()]
+  let max = 0
+  for (const b of out) if (b.w > max) max = b.w
+  for (const b of out) b.norm = max > 0 ? b.w / max : 0
+  out.sort((a, b) => b.w - a.w)
+  return out.slice(0, 400)
+}
+
+/** Flatten GeoJSON Polygon / MultiPolygon geometry to an array of outer rings for Map3D. */
+function geoJsonToOuterRings(geometry) {
+  if (!geometry) return []
+  const rings = []
+  if (geometry.type === 'Polygon' && Array.isArray(geometry.coordinates)) {
+    if (geometry.coordinates[0]) rings.push(geometry.coordinates[0])
+  } else if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+    for (const poly of geometry.coordinates) {
+      if (poly && poly[0]) rings.push(poly[0])
+    }
+  }
+  return rings
+    .map((ring) =>
+      ring
+        .filter((pair) => Array.isArray(pair) && pair.length >= 2 && Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
+        .map(([lng, lat]) => ({ lat, lng, altitude: 0 })),
+    )
+    .filter((ring) => ring.length >= 3)
 }
 
 function nuclearIconDataUrl() {
@@ -269,6 +404,7 @@ class AtlasGlobeErrorBoundary extends Component {
 
 function InnerMap({ onGlobeReady }) {
   const map3dRef = useRef(null)
+  const globeWrapRef = useRef(null)
   const onGlobeReadyRef = useRef(onGlobeReady)
   onGlobeReadyRef.current = onGlobeReady
 
@@ -296,7 +432,6 @@ function InnerMap({ onGlobeReady }) {
 
   const staticIcons = useMemo(
     () => ({
-      choke: chokepointDiamondDataUrl(),
       nuclear: nuclearIconDataUrl(),
     }),
     [],
@@ -553,6 +688,54 @@ function InnerMap({ onGlobeReady }) {
   }, [])
 
   useEffect(() => {
+    const wrap = globeWrapRef.current
+    if (!wrap) return
+
+    let pointerOver = false
+    const onEnter = () => {
+      pointerOver = true
+    }
+    const onLeave = () => {
+      pointerOver = false
+    }
+
+    const onKeyDown = (e) => {
+      const active = document.activeElement
+      const focusInsideGlobe =
+        active instanceof Node && active !== document.body && wrap.contains(active)
+      if (!pointerOver && !focusInsideGlobe) return
+      if (useAtlasStore.getState().isStreetViewOpen) return
+
+      const t = e.target
+      if (
+        t instanceof Element &&
+        t.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
+      ) {
+        return
+      }
+
+      const api = map3dRef.current
+      const el = api?.map3d
+      if (!el) return
+
+      if (applyMap3dKeyboardShortcuts(e, el, RANGE_MIN_M, RANGE_MAX_M)) {
+        e.preventDefault()
+        e.stopPropagation()
+        resetIdleTimer()
+      }
+    }
+
+    wrap.addEventListener('pointerenter', onEnter)
+    wrap.addEventListener('pointerleave', onLeave)
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      wrap.removeEventListener('pointerenter', onEnter)
+      wrap.removeEventListener('pointerleave', onLeave)
+      window.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [resetIdleTimer])
+
+  useEffect(() => {
     useAtlasStore.getState().setOnResetView(() => {
       const map = map3dRef.current
       const center = getTimezoneViewCenter()
@@ -660,11 +843,49 @@ function InnerMap({ onGlobeReady }) {
     return filtered.filter((item) => visibleNewsIds.has(item.id))
   }, [newsItems, activeCategories, visibleNewsIds])
 
+  const dataLayers = useAtlasStore((s) => s.dataLayers)
+  const heatOn = dataLayers?.gdeltHeatmap !== false
+  const choroOn = dataLayers?.gdeltChoropleth === true
+
+  const { heatmapPoints, choroplethRows, toneRange } = useGdeltGeoOverlay()
+
+  const heatBuckets = useMemo(() => {
+    if (!heatOn) return []
+    return bucketHeatPoints(heatmapPoints, 1.5)
+  }, [heatmapPoints, heatOn])
+
+  const choroPolygons = useMemo(() => {
+    if (!choroOn) return []
+    const min = toneRange?.min ?? -5
+    const max = toneRange?.max ?? 5
+    const list = []
+    for (let i = 0; i < choroplethRows.length; i++) {
+      const r = choroplethRows[i]
+      const rings = geoJsonToOuterRings(r.geometry)
+      const fill = toneToChoroplethRgba(r.tone, min, max)
+      for (let j = 0; j < rings.length; j++) {
+        list.push({
+          key: `gdelt-choro-${i}-${j}`,
+          ring: rings[j],
+          fill,
+          stroke: 'rgba(255,255,255,0.22)',
+        })
+      }
+    }
+    return list.slice(0, 220)
+  }, [choroplethRows, choroOn, toneRange])
+
   return (
     <div
-      className="fixed inset-0 z-0"
+      ref={globeWrapRef}
+      tabIndex={-1}
+      aria-label="3D globe"
+      className="fixed inset-0 z-0 outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/30 focus-visible:ring-offset-2 focus-visible:ring-offset-black/40"
       style={{ cursor: 'grab' }}
-      onPointerDown={resetIdleTimer}
+      onPointerDown={(e) => {
+        resetIdleTimer()
+        if (e.button === 0) e.currentTarget.focus({ preventScroll: true })
+      }}
       onWheel={resetIdleTimer}
       onPointerMove={(e) => {
         lastPointerRef.current = { x: e.clientX, y: e.clientY }
@@ -672,9 +893,8 @@ function InnerMap({ onGlobeReady }) {
     >
       <Map3D
         ref={map3dRef}
-        mode={MapMode.SATELLITE}
+        mode={MapMode.HYBRID}
         defaultUIHidden
-        defaultLabelsDisabled={false}
         defaultCenter={defaultCenter}
         defaultRange={STARTUP_ORBIT_RANGE_M}
         defaultTilt={STARTUP_ORBIT_TILT}
@@ -713,6 +933,42 @@ function InnerMap({ onGlobeReady }) {
             />
           ))}
 
+        {vectorLayersReady &&
+          choroPolygons.map((cp) => (
+            <Polygon3D
+              key={cp.key}
+              outerCoordinates={cp.ring}
+              fillColor={cp.fill}
+              strokeColor={cp.stroke}
+              strokeWidth={0.6}
+            />
+          ))}
+
+        {heatBuckets.map((b, i) => {
+          const alpha = Math.max(0.22, Math.min(0.85, 0.28 + b.norm * 0.7))
+          const size = Math.round(28 + b.norm * 44)
+          return (
+            <Marker3D
+              key={`gdelt-heat-${i}`}
+              position={{ lat: b.lat, lng: b.lng, altitude: 80 }}
+              altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
+              drawsWhenOccluded
+              sizePreserved
+              collisionBehavior={CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY}
+              zIndex={-1}
+            >
+              <img
+                src={heatSpriteDataUrl(Math.round(alpha * 10) / 10)}
+                width={size}
+                height={size}
+                alt=""
+                draggable={false}
+                style={{ pointerEvents: 'none' }}
+              />
+            </Marker3D>
+          )
+        })}
+
         {clusterLayers.map((cl) => (
           <Marker3D
             key={`${cl.key}-badge`}
@@ -723,21 +979,20 @@ function InnerMap({ onGlobeReady }) {
             sizePreserved
             collisionBehavior={CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY}
             zIndex={2}
+            onClick={(e) => {
+              e?.stopPropagation?.()
+              e?.preventDefault?.()
+              const ev0 = cl.events?.[0]
+              useAtlasStore.getState().openGdeltAnalytics({
+                query: buildGdeltDocQuery({
+                  title: ev0?.title || '',
+                  dimension: cl.dimension,
+                }),
+                label: `Cluster · ${cl.count} signals`,
+                dimension: cl.dimension,
+              })
+            }}
           />
-        ))}
-
-        {MARITIME_CHOKEPOINTS.map((cp) => (
-          <Marker3D
-            key={cp.name}
-            position={{ lat: cp.lat, lng: cp.lng }}
-            label={cp.name.toUpperCase()}
-            drawsWhenOccluded
-            sizePreserved
-            collisionBehavior={CollisionBehavior.OPTIONAL_AND_HIDES_LOWER_PRIORITY}
-            zIndex={1}
-          >
-            <img src={staticIcons.choke} width={14} height={14} alt="" draggable={false} />
-          </Marker3D>
         ))}
 
         {NUCLEAR_FACILITIES.map((nf) => (

@@ -9,9 +9,12 @@ import { useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet.heat'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { getCategoryColor, CATEGORIES } from '../../utils/categoryColors'
+import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
+import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
 
 // Dark tile layer matching Atlas design
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
@@ -42,6 +45,100 @@ function ZoomSync() {
     return null
 }
 
+/** GDELT PointHeatmap overlay — density of events in the last `timespan`. */
+function GdeltHeatLayer({ points }) {
+    const map = useMap()
+    const layerRef = useRef(null)
+
+    useEffect(() => {
+        if (!points || points.length === 0) {
+            if (layerRef.current) {
+                map.removeLayer(layerRef.current)
+                layerRef.current = null
+            }
+            return
+        }
+        const maxWeight = points.reduce((m, p) => Math.max(m, p.weight || 1), 1)
+        const latlngs = points.map((p) => [p.lat, p.lng, (p.weight || 1) / maxWeight])
+        if (!layerRef.current) {
+            layerRef.current = L.heatLayer(latlngs, {
+                radius: 22,
+                blur: 18,
+                minOpacity: 0.25,
+                max: 1,
+                gradient: {
+                    0.2: '#1a90ff',
+                    0.4: '#00e6ff',
+                    0.6: '#ffe066',
+                    0.8: '#ff7a3c',
+                    1.0: '#ff2d55',
+                },
+            }).addTo(map)
+        } else {
+            layerRef.current.setLatLngs(latlngs)
+        }
+        return () => {
+            if (layerRef.current) {
+                map.removeLayer(layerRef.current)
+                layerRef.current = null
+            }
+        }
+    }, [map, points])
+
+    return null
+}
+
+/** Country/ADM1 tone choropleth overlay. */
+function GdeltChoroplethLayer({ rows, toneRange }) {
+    const map = useMap()
+    const layerRef = useRef(null)
+
+    useEffect(() => {
+        if (layerRef.current) {
+            map.removeLayer(layerRef.current)
+            layerRef.current = null
+        }
+        if (!rows || rows.length === 0) return undefined
+
+        const features = rows
+            .map((r, i) => ({
+                type: 'Feature',
+                geometry: r.geometry,
+                properties: { __idx: i, name: r.name, tone: r.tone, count: r.count },
+            }))
+
+        const geojson = { type: 'FeatureCollection', features }
+        const min = toneRange?.min ?? -5
+        const max = toneRange?.max ?? 5
+
+        layerRef.current = L.geoJSON(geojson, {
+            style: (feat) => ({
+                fillColor: toneToChoroplethRgba(feat.properties.tone, min, max),
+                fillOpacity: 0.55,
+                color: 'rgba(255,255,255,0.25)',
+                weight: 0.6,
+            }),
+            onEachFeature: (feat, layer) => {
+                const { name, tone, count } = feat.properties
+                layer.bindTooltip(
+                    `<div class="flatmap-tooltip-inner"><span class="flatmap-tooltip-cat">${name || '—'}</span></div>` +
+                    `<div class="flatmap-tooltip-title">Tone ${Number(tone).toFixed(2)} · ${count} mentions</div>`,
+                    { direction: 'top', sticky: true, className: 'flatmap-tooltip' },
+                )
+            },
+        }).addTo(map)
+
+        return () => {
+            if (layerRef.current) {
+                map.removeLayer(layerRef.current)
+                layerRef.current = null
+            }
+        }
+    }, [map, rows, toneRange])
+
+    return null
+}
+
 /** Reset view handler */
 function ResetViewHandler() {
     const map = useMap()
@@ -62,8 +159,13 @@ export default function FlatMap({ onGlobeReady }) {
     const newsItems = useAtlasStore((s) => s.newsItems)
     const activeCategories = useAtlasStore((s) => s.activeCategories)
     const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
+    const dataLayers = useAtlasStore((s) => s.dataLayers)
     const onGlobeReadyRef = useRef(onGlobeReady)
     onGlobeReadyRef.current = onGlobeReady
+
+    const { heatmapPoints, choroplethRows, toneRange } = useGdeltGeoOverlay()
+    const heatOn = dataLayers?.gdeltHeatmap !== false
+    const choroOn = dataLayers?.gdeltChoropleth === true
 
     // Filter visible items
     const visibleItems = useMemo(() => {
@@ -109,6 +211,13 @@ export default function FlatMap({ onGlobeReady }) {
                 />
                 <ZoomSync />
                 <ResetViewHandler />
+
+                {choroOn && choroplethRows.length > 0 && (
+                    <GdeltChoroplethLayer rows={choroplethRows} toneRange={toneRange} />
+                )}
+                {heatOn && heatmapPoints.length > 0 && (
+                    <GdeltHeatLayer points={heatmapPoints} />
+                )}
 
                 {visibleItems.map((item) => {
                     const color = getCategoryColor(item.category)

@@ -29,6 +29,8 @@ import { isMobileDevice } from '../../config/qualityTiers'
 import { getTimezoneViewCenter } from '../../utils/geo'
 import { getCategoryColor } from '../../utils/categoryColors'
 import { DIMENSION_COLORS } from '../../core/eventSchema'
+import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
+import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
 
 // Textures (CDN)
 const EARTH_DAY = 'https://cdn.jsdelivr.net/npm/three-globe/example/img/earth-day.jpg'
@@ -220,6 +222,10 @@ export default function GlobeGLView({ onGlobeReady }) {
     const resolvedTier = useAtlasStore((s) => s.resolvedTier)
     const qualityOverrides = useAtlasStore((s) => s.qualityOverrides)
     const isMobile = isMobileDevice()
+
+    const { heatmapPoints, choroplethRows, toneRange } = useGdeltGeoOverlay()
+    const heatOn = dataLayers?.gdeltHeatmap !== false
+    const choroOn = dataLayers?.gdeltChoropleth === true
 
     /** Map event source IDs to data layer keys */
     const sourceToLayer = useCallback((source) => {
@@ -544,6 +550,28 @@ export default function GlobeGLView({ onGlobeReady }) {
             .labelResolution(2)
             .labelAltitude(POINT_ALTITUDE + 0.005)
 
+        // ── GDELT heatmap + choropleth layers ──
+        globe
+            .heatmapsData([])
+            .heatmapPoints((d) => d.points || [])
+            .heatmapPointLat('lat')
+            .heatmapPointLng('lng')
+            .heatmapPointWeight('weight')
+            .heatmapBandwidth(1.8)
+            .heatmapColorSaturation(1.8)
+            .heatmapBaseAltitude(0.005)
+            .heatmapTopAltitude(0.09)
+            .heatmapsTransitionDuration(800)
+
+        globe
+            .polygonsData([])
+            .polygonGeoJsonGeometry('geometry')
+            .polygonAltitude(0.006)
+            .polygonCapColor((d) => d.__capColor || 'rgba(40,120,200,0.4)')
+            .polygonSideColor(() => 'rgba(0, 0, 0, 0.08)')
+            .polygonStrokeColor(() => 'rgba(255,255,255,0.22)')
+            .polygonsTransitionDuration(600)
+
         globeRef.current = globe
 
         // ── Register reset-view callback (Header button) ──
@@ -623,6 +651,38 @@ export default function GlobeGLView({ onGlobeReady }) {
             .slice(0, isMobile ? 15 : 80)
         globe.ringsData(ringItems)
     }, [newsItems, activeCategories, events, dataLayers, getVisibleItems])
+
+    // ── GDELT heatmap data sync ──
+    useEffect(() => {
+        const globe = globeRef.current
+        if (!globe) return
+        if (!heatOn || heatmapPoints.length === 0) {
+            globe.heatmapsData([])
+            return
+        }
+        globe.heatmapsData([{ points: heatmapPoints }])
+    }, [heatmapPoints, heatOn])
+
+    // ── GDELT choropleth data sync ──
+    useEffect(() => {
+        const globe = globeRef.current
+        if (!globe) return
+        if (!choroOn || choroplethRows.length === 0) {
+            globe.polygonsData([])
+            return
+        }
+        const min = toneRange?.min ?? -5
+        const max = toneRange?.max ?? 5
+        const polys = choroplethRows.map((r, i) => ({
+            __id: `gdelt-choro-${i}`,
+            geometry: r.geometry,
+            __capColor: toneToChoroplethRgba(r.tone, min, max),
+            name: r.name,
+            tone: r.tone,
+            count: r.count,
+        }))
+        globe.polygonsData(polys)
+    }, [choroplethRows, toneRange, choroOn])
 
     // ── Zoom sync ──
     useEffect(() => {

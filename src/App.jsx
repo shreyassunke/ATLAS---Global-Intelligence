@@ -12,6 +12,7 @@ import Header from './components/UI/Header'
 import FilterPanel from './components/UI/FilterPanel'
 import NewsCard from './components/UI/NewsCard'
 import EventPanel from './components/UI/EventPanel'
+import GDELTAnalyticsPanel from './components/UI/GDELTAnalyticsPanel'
 import LiveTicker from './components/Feed/LiveTicker'
 import HoverLabel from './components/UI/RegionRing'
 import StreetViewOverlay from './components/UI/StreetViewOverlay'
@@ -128,6 +129,7 @@ export default function App() {
 
       if (e.key === 'Escape') {
         setHudHidden(false)
+        useAtlasStore.getState().closeGdeltAnalytics()
         useAtlasStore.getState().setSelectedEvent(null)
         useAtlasStore.getState().setSelectedMarker(null)
         return
@@ -245,6 +247,7 @@ export default function App() {
                   </AnimatePresence>
 
                   <EventPanel />
+                  <GDELTAnalyticsPanel />
                   <NewsCard />
                   <StreetViewOverlay />
                   <YouTubeEmbedOverlay />

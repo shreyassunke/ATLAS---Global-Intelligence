@@ -1,5 +1,10 @@
+import { fetchGdeltCameoEvents } from '../services/gdelt/eventService.js'
+
 const INITIAL_BACKOFF = 5000
 const MAX_BACKOFF = 300_000
+
+/** GDELT asks for ≥5s between requests — stay conservative for chained GEO calls. */
+const GDELT_REQUEST_GAP_MS = 5500
 
 const moduleState = {}
 let envKeys = {}
@@ -111,6 +116,115 @@ const COUNTRY_CENTROIDS = {
   GB:[54,-2],US:[38,-97],UY:[-33,-56],UZ:[41,64],VE:[8,-66],VN:[16,106],YE:[15,48],
   ZM:[-15,30],ZW:[-20,30],
 }
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** Map GDELT ArtList `sourcecountry` (English labels) → ISO2 for centroid lookup. Keys: lowercase, no spaces. */
+const GDELT_COUNTRY_NAME_TO_ISO = {
+  afghanistan: 'AF', albania: 'AL', algeria: 'DZ', angola: 'AO', argentina: 'AR', armenia: 'AM',
+  australia: 'AU', austria: 'AT', azerbaijan: 'AZ', bangladesh: 'BD', belarus: 'BY', belgium: 'BE',
+  benin: 'BJ', bolivia: 'BO', 'bosniaandherzegovina': 'BA', brazil: 'BR', bulgaria: 'BG', 'burkinafaso': 'BF',
+  burundi: 'BI', cambodia: 'KH', cameroon: 'CM', canada: 'CA', 'centralafricanrepublic': 'CF', chad: 'TD',
+  chile: 'CL', china: 'CN', colombia: 'CO', 'democraticrepublicofthecongo': 'CD', congo: 'CG', 'costarica': 'CR',
+  croatia: 'HR', cuba: 'CU', czechia: 'CZ', czechrepublic: 'CZ', denmark: 'DK', djibouti: 'DJ', 'dominicanrepublic': 'DO',
+  ecuador: 'EC', egypt: 'EG', 'elsalvador': 'SV', eritrea: 'ER', ethiopia: 'ET', finland: 'FI', france: 'FR',
+  gabon: 'GA', germany: 'DE', ghana: 'GH', greece: 'GR', guatemala: 'GT', guinea: 'GN', haiti: 'HT', honduras: 'HN',
+  hungary: 'HU', india: 'IN', indonesia: 'ID', iran: 'IR', iraq: 'IQ', ireland: 'IE', israel: 'IL', italy: 'IT',
+  jamaica: 'JM', japan: 'JP', jordan: 'JO', kazakhstan: 'KZ', kenya: 'KE', 'northkorea': 'KP', 'southkorea': 'KR',
+  kuwait: 'KW', kyrgyzstan: 'KG', laos: 'LA', latvia: 'LV', lebanon: 'LB', liberia: 'LR', libya: 'LY', lithuania: 'LT',
+  luxembourg: 'LU', madagascar: 'MG', malawi: 'MW', malaysia: 'MY', mali: 'ML', malta: 'MT', mauritania: 'MR',
+  mexico: 'MX', moldova: 'MD', mongolia: 'MN', montenegro: 'ME', morocco: 'MA', mozambique: 'MZ', myanmar: 'MM',
+  namibia: 'NA', nepal: 'NP', netherlands: 'NL', 'newzealand': 'NZ', nicaragua: 'NI', niger: 'NE', nigeria: 'NG',
+  norway: 'NO', oman: 'OM', pakistan: 'PK', panama: 'PA', paraguay: 'PY', peru: 'PE', philippines: 'PH', poland: 'PL',
+  portugal: 'PT', qatar: 'QA', romania: 'RO', russia: 'RU', rwanda: 'RW', 'saudiarabia': 'SA', senegal: 'SN', serbia: 'RS',
+  'sierraleone': 'SL', singapore: 'SG', slovakia: 'SK', slovenia: 'SI', somalia: 'SO', 'southafrica': 'ZA', spain: 'ES',
+  'srilanka': 'LK', sudan: 'SD', sweden: 'SE', switzerland: 'CH', syria: 'SY', taiwan: 'TW', tajikistan: 'TJ',
+  tanzania: 'TZ', thailand: 'TH', togo: 'TG', tunisia: 'TN', turkey: 'TR', turkmenistan: 'TM', uganda: 'UG', ukraine: 'UA',
+  'unitedarabemirates': 'AE', 'unitedkingdom': 'GB', uk: 'GB', 'greatbritain': 'GB', 'unitedstates': 'US', usa: 'US',
+  uruguay: 'UY', uzbekistan: 'UZ', venezuela: 'VE',   vietnam: 'VN', yemen: 'YE', zambia: 'ZM', zimbabwe: 'ZW',
+}
+
+function normalizeGdeltCountryLabel(label) {
+  return String(label || '').toLowerCase().replace(/[\s._-]+/g, '').trim()
+}
+
+function lookupCentroidFromSourceCountry(sourcecountry) {
+  const key = normalizeGdeltCountryLabel(sourcecountry)
+  if (!key) return null
+  const iso = GDELT_COUNTRY_NAME_TO_ISO[key] || (key.length === 2 ? key.toUpperCase() : null)
+  if (!iso || !COUNTRY_CENTROIDS[iso]) return null
+  const [lat, lng] = COUNTRY_CENTROIDS[iso]
+  return { lat, lng, iso }
+}
+
+/** GDELT DOC `seendate`: YYYYMMDDTHHmmssZ */
+function gdeltSeendateToTimestampMs(seendate) {
+  if (!seendate || typeof seendate !== 'string') return Date.now()
+  const m = seendate.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/)
+  if (!m) return Date.parse(seendate) || Date.now()
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])
+}
+
+/** GDELT GEO `tone` field: comma-separated metrics (avg, pos, neg, polarity, activity, self/group ref, …). */
+function parseGdeltToneField(raw) {
+  if (raw == null || raw === '') return null
+  const parts = String(raw).split(',').map((p) => parseFloat(String(p).trim()))
+  const num = (i) => (Number.isFinite(parts[i]) ? parts[i] : null)
+  return {
+    avgTone: num(0),
+    posTone: num(1),
+    negTone: num(2),
+    polarity: num(3),
+    activityDensity: num(4),
+    selfGroupRefDensity: num(5),
+  }
+}
+
+function inferDocArticleDimension(article) {
+  const blob = `${article?.title || ''} ${article?.url || ''} ${article?.domain || ''}`.toLowerCase()
+  const tests = [
+    { dimension: 'safety', re: /\b(war|conflict|attack|military|missile|bomb|terror|casualties|sanctions violation)\b/i },
+    { dimension: 'governance', re: /\b(election|parliament|congress|senate|court|law|bill|treaty|diplomat|ministry|corruption|impeach)\b/i },
+    { dimension: 'economy', re: /\b(stock|market|trade|tariff|gdp|inflation|recession|bank|currency|oil price|fed|ecb)\b/i },
+    { dimension: 'people', re: /\b(protest|refugee|migration|strike|health|hospital|disease|hunger|human rights|unemployment)\b/i },
+    { dimension: 'environment', re: /\b(climate|flood|earthquake|storm|wildfire|pollution|emission|drought|hurricane|tsunami)\b/i },
+    { dimension: 'narrative', re: /\b(media|press|journalist|censorship|disinformation|social media|broadcast|narrative)\b/i },
+  ]
+  for (const { dimension, re } of tests) {
+    if (re.test(blob)) return dimension
+  }
+  return 'narrative'
+}
+
+function gdeltSqlDateToIso(sqlDate) {
+  const s = String(sqlDate || '')
+  if (s.length < 8) return new Date().toISOString()
+  const y = s.slice(0, 4)
+  const mo = s.slice(4, 6)
+  const d = s.slice(6, 8)
+  return `${y}-${mo}-${d}T12:00:00.000Z`
+}
+
+/** One GEO request per dimension (query breadth), merged in the worker with rate limiting. */
+const GDELT_GEO_DIM_QUERIES = [
+  { query: '(conflict OR war OR military OR terror OR attack OR violence)', dimension: 'safety' },
+  { query: '(election OR parliament OR law OR court OR sanctions OR diplomacy OR treaty OR government OR corruption)', dimension: 'governance' },
+  { query: '(economy OR trade OR market OR inflation OR GDP OR tariff OR recession OR bank)', dimension: 'economy' },
+  { query: '(humanitarian OR migration OR refugee OR health OR disease OR hospital OR hunger OR strike OR labor)', dimension: 'people' },
+  { query: '(climate OR environment OR pollution OR wildfire OR flood OR storm OR earthquake OR disaster OR renewable)', dimension: 'environment' },
+  { query: '(media OR censorship OR journalist OR press OR disinformation OR narrative OR broadcast)', dimension: 'narrative' },
+]
+
+const GDELT_DOC_OR_QUERY = [
+  '(conflict OR war OR military OR terror OR attack OR violence OR protest)',
+  '(election OR parliament OR law OR court OR sanctions OR diplomacy OR treaty OR government OR corruption)',
+  '(economy OR trade OR market OR inflation OR GDP OR tariff OR recession OR bank)',
+  '(humanitarian OR migration OR refugee OR health OR disease OR hospital OR hunger OR strike OR labor)',
+  '(climate OR environment OR pollution OR wildfire OR flood OR storm OR earthquake OR disaster OR renewable)',
+  '(media OR censorship OR journalist OR press OR disinformation OR narrative OR broadcast)',
+].join(' OR ')
 
 // ══════════════════════════════════════════════════════════════
 //  NORMALIZERS — one per source ID
@@ -347,59 +461,101 @@ const NORMALIZERS = {
 
   'gdelt-events': (data) => {
     if (!data?.features) return []
-    return data.features.slice(0, 60).map(f => {
+    const seen = new Set()
+    const out = []
+    for (const f of data.features) {
       const props = f.properties || {}
       const coords = f.geometry?.coordinates
-      if (!coords || coords.length < 2) return null
+      if (!coords || coords.length < 2) continue
       const [lng, lat] = coords
-      if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return null
+      if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) continue
 
       const name = props.name || props.html || 'Geopolitical Event'
+      const dedupeKey = `${lat.toFixed(3)}|${lng.toFixed(3)}|${String(name).slice(0, 48)}`
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+
       const url = props.url || props.shareimage || ''
       const urlDimension = props.dimension || props.sourcecountry || ''
-      const tone = parseFloat(props.tone?.split(',')?.[0] || 0)
+      const toneParts = parseGdeltToneField(props.tone)
+      const tone = Number.isFinite(toneParts?.avgTone)
+        ? toneParts.avgTone
+        : (parseFloat(String(props.tone).split(',')[0]) || 0)
+      const hinted = props._atlasDimensionHint
+      let priority = 'p3'
+      let severity = 1
+      let dimension = typeof hinted === 'string' && hinted ? hinted : 'narrative'
 
-      // Map tone to priority/severity (GDELT tone: negative = conflictive, positive = cooperative)
-      let priority = 'p3', severity = 1, dimension = 'narrative'
-      if (tone <= -5) { priority = 'p2'; severity = 3; dimension = 'safety' }
-      else if (tone <= -2) { priority = 'p2'; severity = 2; dimension = 'safety' }
-      else if (tone >= 5) { priority = 'p3'; severity = 1; dimension = 'narrative' }
+      if (!hinted) {
+        if (tone <= -5) { priority = 'p2'; severity = 3; dimension = 'safety' }
+        else if (tone <= -2) { priority = 'p2'; severity = 2; dimension = 'safety' }
+        else if (tone >= 5) { priority = 'p3'; severity = 1; dimension = 'narrative' }
+      } else {
+        if (tone <= -5) { priority = 'p2'; severity = Math.max(severity, 3) }
+        else if (tone <= -2) { priority = 'p2'; severity = Math.max(severity, 2) }
+      }
 
-      const count = parseInt(props.numarts || props.numsources || 1)
+      const count = parseInt(props.numarts || props.numsources || 1, 10)
       const corrobCount = Math.min(5, Math.max(1, Math.ceil(count / 3)))
 
-      return makeEvent({
-        id: createEventId(lat, lng, Date.now(), 'gdelt-events', name.substring(0, 60)),
+      const toneDetail = toneParts
+        ? `Avg ${toneParts.avgTone?.toFixed(2) ?? '—'} · Pos ${toneParts.posTone?.toFixed(2) ?? '—'} · Neg ${toneParts.negTone?.toFixed(2) ?? '—'} · Polarity ${toneParts.polarity?.toFixed(2) ?? '—'} · Activity ${toneParts.activityDensity?.toFixed(2) ?? '—'} · Self/group ${toneParts.selfGroupRefDensity?.toFixed(2) ?? '—'}`
+        : `Tone: ${tone.toFixed(1)}`
+
+      const tsMs = gdeltSeendateToTimestampMs(props.seendate || props.datetime || '')
+      out.push(makeEvent({
+        id: createEventId(lat, lng, tsMs, 'gdelt-events', name.substring(0, 60)),
         priority,
-    priority: priority, // legacy compat
- dimension, lat, lng, severity,
+        priority: priority, // legacy compat
+        dimension, lat, lng, severity,
         corroborationCount: corrobCount,
-        corroborationSources: ['gdelt'], ttl: 900,
+        corroborationSources: ['gdelt-events'], ttl: 900,
         title: name.length > 120 ? name.substring(0, 117) + '…' : name,
-        detail: `Source: ${urlDimension}. Tone: ${tone.toFixed(1)}. Articles: ${count}.`,
+        detail: `Where: ${urlDimension || 'unknown'}. ${toneDetail}. Articles: ${count}.`,
         source: 'GDELT', sourceUrl: url || 'https://gdeltproject.org',
         tags: ['geopolitical', 'gdelt', dimension],
-        timestamp: new Date().toISOString(),
-      })
-    }).filter(Boolean)
+        timestamp: new Date(tsMs).toISOString(),
+      }))
+    }
+    return out
   },
 
   gdelt: (data) => {
     if (!data?.articles) return []
-    return data.articles.slice(0, 20).map(a => {
+    return data.articles.slice(0, 45).map((a) => {
       const url = a.url || ''
-      const dimension = a.dimension || ''
+      const centroid = lookupCentroidFromSourceCountry(a.sourcecountry)
+      const lat = centroid?.lat ?? 0
+      const lng = centroid?.lng ?? 0
+      const hasGeo = Boolean(centroid)
+      const dimension = inferDocArticleDimension(a)
+      const tsMs = gdeltSeendateToTimestampMs(a.seendate)
+      const title = a.title || 'Global Event'
+      if (!hasGeo) {
+        return null
+      }
+      let priority = 'p3'
+      let severity = 1
+      if (dimension === 'safety') { severity = 2; priority = 'p2' }
       return makeEvent({
-        id: createEventId(0, 0, Date.parse(a.seendate || Date.now()), 'gdelt', a.title || url),
-        priority: 'p3', dimension: 'narrative', lat: 0, lng: 0, latApproximate: true,
-        severity: 1, corroborationSources: ['gdelt'], ttl: 600,
-        title: a.title || 'Global Event',
-        detail: `Source: ${dimension}. ${a.socialimage ? '' : ''}`.trim(),
-        source: 'GDELT', sourceUrl: url || 'https://gdeltproject.org',
-        tags: ['news', 'gdelt'],
-        timestamp: a.seendate ? a.seendate.replace(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/, '$1-$2-$3T$4:$5:$6Z') : new Date().toISOString(),
+        id: createEventId(lat, lng, tsMs, 'gdelt', title || url),
+        priority,
+        priority: priority, // legacy compat
+        dimension,
+        lat,
+        lng,
+        latApproximate: true,
+        severity,
+        corroborationSources: ['gdelt'],
+        ttl: 600,
+        title,
+        detail: `Outlet country: ${a.sourcecountry || 'unknown'}. Language: ${a.language || 'unknown'}.`,
+        source: 'GDELT',
+        sourceUrl: url || 'https://gdeltproject.org',
+        tags: ['news', 'gdelt', dimension, centroid?.iso || ''].filter(Boolean),
+        timestamp: new Date(tsMs).toISOString(),
       })
-    })
+    }).filter(Boolean)
   },
 
   // ── MODULE 1: Conflict (UCDP) ──
@@ -862,12 +1018,17 @@ const SOURCE_CONFIGS = {
     format: 'json', pollInterval: 300_000,
   },
   gdelt: {
-    url: 'https://api.gdeltproject.org/api/v2/doc/doc?query=crisis+OR+conflict+OR+earthquake+OR+war&mode=ArtList&maxrecords=20&format=json',
+    url: `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(GDELT_DOC_OR_QUERY)}&mode=ArtList&maxrecords=45&format=json`,
     format: 'json', pollInterval: 300_000,
   },
   'gdelt-events': {
-    url: 'https://api.gdeltproject.org/api/v2/geo/geo?query=conflict+OR+war+OR+military+OR+protest+OR+terrorism+OR+sanctions&mode=PointData&format=GeoJSON&timespan=60min&maxrows=60',
-    format: 'json', pollInterval: 900_000,
+    format: 'json',
+    pollInterval: 900_000,
+    gdeltGeoChain: GDELT_GEO_DIM_QUERIES,
+  },
+  'gdelt-cameo': {
+    format: 'json',
+    pollInterval: 1_200_000,
   },
   ucdp: {
     url: 'https://ucdpapi.pcr.uu.se/api/gedevents/24.1?pagesize=50',
@@ -1001,15 +1162,75 @@ async function fetchSource(sourceId) {
   const config = allConfigs[sourceId]
   if (!config) return []
 
+  const state = getState(sourceId)
+
+  if (sourceId === 'gdelt-cameo') {
+    try {
+      const rows = await fetchGdeltCameoEvents()
+      const events = rows.map((row) => {
+        const ts = Date.parse(gdeltSqlDateToIso(row.sqlDate))
+        const sev = Math.min(5, Math.max(1, row.severity || 1))
+        const priority = sev >= 4 ? 'p1' : sev >= 2 ? 'p2' : 'p3'
+        return makeEvent({
+          id: createEventId(row.lat, row.lng, ts, 'gdelt-cameo', row.title),
+          priority,
+          priority: priority, // legacy compat
+          dimension: row.dimension,
+          lat: row.lat,
+          lng: row.lng,
+          severity: sev,
+          corroborationCount: row.corroborationCount || 1,
+          corroborationSources: ['gdelt-cameo'],
+          title: row.title,
+          detail: `${row.detail} Mentions: ${row.numMentions}. Actors: ${[row.actor1, row.actor2].filter(Boolean).join(' → ') || 'n/a'}.`,
+          source: 'GDELT',
+          sourceUrl: row.sourceUrl || 'https://www.gdeltproject.org',
+          tags: ['gdelt', 'cameo', `cameo${row.cameoRoot || ''}`, typeof row.quadClass === 'number' ? `qc${row.quadClass}` : ''].filter(Boolean),
+          timestamp: gdeltSqlDateToIso(row.sqlDate),
+          ttl: 1200,
+        })
+      })
+      state.backoff = INITIAL_BACKOFF
+      state.errorCount = 0
+      state.lastFetch = Date.now()
+      return events
+    } catch (err) {
+      state.errorCount++
+      state.backoff = Math.min(state.backoff * 2, MAX_BACKOFF)
+      self.postMessage({
+        type: 'SOURCE_ERROR',
+        sourceId,
+        error: err.message,
+        nextRetry: state.backoff,
+      })
+      return []
+    }
+  }
+
   const normalizer = NORMALIZERS[sourceId]
   if (!normalizer) return []
-
-  const state = getState(sourceId)
 
   try {
     const fetchOpts = config.headers ? { headers: config.headers } : {}
     let data
-    if (config.format === 'json') {
+
+    if (Array.isArray(config.gdeltGeoChain) && config.gdeltGeoChain.length > 0) {
+      const merged = { type: 'FeatureCollection', features: [] }
+      for (let i = 0; i < config.gdeltGeoChain.length; i++) {
+        if (i > 0) await sleep(GDELT_REQUEST_GAP_MS)
+        const { query, dimension } = config.gdeltGeoChain[i]
+        const geoUrl = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodeURIComponent(query)}&mode=PointData&format=GeoJSON&timespan=60min&maxpoints=250`
+        const res = await fetch(geoUrl, fetchOpts)
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${geoUrl}`)
+        const chunk = await res.json()
+        for (const f of chunk.features || []) {
+          const props = f.properties || {}
+          f.properties = { ...props, _atlasDimensionHint: dimension }
+          merged.features.push(f)
+        }
+      }
+      data = merged
+    } else if (config.format === 'json') {
       const res = await fetch(config.url, fetchOpts)
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${config.url}`)
       data = await res.json()

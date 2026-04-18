@@ -182,19 +182,6 @@ export default function StreetViewOverlay() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isStreetViewOpen, closeStreetView])
 
-  const handleTogglePanel = () => {
-    if (!hasCoords) return
-    if (isStreetViewOpen) {
-      closeStreetView()
-    } else {
-      openStreetView({
-        lat: streetViewLocation.lat,
-        lng: streetViewLocation.lng,
-        source: streetViewLocation.source,
-        meta: streetViewLocation.meta,
-      })
-    }
-  }
 
   if (!hasLocation) return null
 
@@ -204,22 +191,6 @@ export default function StreetViewOverlay() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={handleTogglePanel}
-        className={`
-          fixed bottom-6 right-6 z-40
-          w-11 h-11 rounded-full
-          glass flex items-center justify-center
-          border border-white/20
-          text-xs font-mono cursor-pointer
-          ${isStreetViewOpen ? 'bg-[var(--accent)] text-black' : 'bg-black/60 text-white'}
-        `}
-        title="Open Street View"
-      >
-        SV
-      </button>
-
       <AnimatePresence>
         {isStreetViewOpen && hasCoords && (
           <motion.div

@@ -15,15 +15,18 @@
  * Attribution: "Data provided by the GDELT Project (https://www.gdeltproject.org)"
  */
 
-import { DIMENSIONS, cameoToDimension } from '../core/eventSchema.js'
+import { unzipSync, strFromU8 } from 'fflate'
+import { DIMENSIONS, cameoToDimension } from '../../core/eventSchema.js'
 
 // ── CAMEO root codes we care about ──
 // 14 = Protest, 17 = Coerce, 18 = Assault, 19 = Fight, 20 = Use Unconventional Mass Violence
 // 13 = Threaten, 12 = Reject, 10 = Demand
 // 04 = Consult, 05 = Engage in Diplomacy, 06 = Cooperate, 036 = Express intent to meet or negotiate
+// 07 = Aid, 08 = Yield — material cooperation / economy-adjacent
 const CONFLICT_CODES = new Set(['14', '17', '18', '19', '20'])
 const THREAT_CODES = new Set(['13', '12', '10'])
 const DIPLOMACY_CODES = new Set(['04', '05', '06'])
+const MATERIAL_COOP_CODES = new Set(['07', '08'])
 
 /**
  * Map GDELT QuadClass (1-4) to an ATLAS dimension + severity
@@ -82,12 +85,13 @@ function parseGdeltRow(columns) {
   const numSources = parseInt(columns[COL.NumSources]) || 0
 
   // Filter: only keep events with meaningful CAMEO codes
-  if (!CONFLICT_CODES.has(cameoRoot) && !THREAT_CODES.has(cameoRoot) && !DIPLOMACY_CODES.has(cameoRoot)) {
+  if (!CONFLICT_CODES.has(cameoRoot) && !THREAT_CODES.has(cameoRoot) && !DIPLOMACY_CODES.has(cameoRoot) && !MATERIAL_COOP_CODES.has(cameoRoot)) {
     return null
   }
 
-  // Skip low-signal events (less than 3 mentions = noise)
-  if (numMentions < 3) return null
+  // Skip low-signal events (cooperation/aid rows are often widely syndicated → lower threshold)
+  const minMentions = MATERIAL_COOP_CODES.has(cameoRoot) ? 2 : 3
+  if (numMentions < minMentions) return null
 
   const classification = classifyEvent(quadClass, cameoRoot, goldstein)
 
@@ -165,7 +169,7 @@ export async function fetchGdeltEvents() {
   try {
     // Step 1: Get the latest CSV URL from GDELT's lastupdate file
     const updateRes = await fetch(
-      'http://data.gdeltproject.org/gdeltv2/lastupdate.txt'
+      'https://data.gdeltproject.org/gdeltv2/lastupdate.txt'
     )
     if (!updateRes.ok) throw new Error(`GDELT lastupdate HTTP ${updateRes.status}`)
     const updateText = await updateRes.text()
@@ -221,4 +225,85 @@ export async function fetchGdeltEvents() {
   }
 }
 
-export { classifyEvent, parseGdeltRow, CAMEO_LABELS, CONFLICT_CODES, THREAT_CODES, DIPLOMACY_CODES }
+/**
+ * Parse a GDELT 2.0 Events export body (tab-separated, header row optional).
+ * Used after safe unzip of a bounded export file.
+ */
+export function parseGdeltCsvText(text, maxRows = 400) {
+  if (!text || typeof text !== 'string') return []
+  const lines = text.split(/\n/)
+  const out = []
+  let start = 0
+  // Skip header if first cell looks like a column name
+  if (lines[0] && /GLOBALEVENTID/i.test(lines[0].split('\t')[0] || '')) {
+    start = 1
+  }
+  for (let i = start; i < lines.length && out.length < maxRows; i++) {
+    const line = lines[i]
+    if (!line || !line.trim()) continue
+    const parsed = parseGdeltRow(line.split('\t'))
+    if (parsed) out.push(parsed)
+  }
+  return out
+}
+
+/** Strict allowlist: only official GDELT v2 15-minute event exports (SSRF-safe). */
+const GDELT_EXPORT_ZIP_RE = /^https:\/\/data\.gdeltproject\.org\/gdeltv2\/\d{14}\.export\.CSV\.zip$/
+
+/** Browser-safe upper bound: larger files are skipped (typical exports exceed this). */
+const MAX_ZIP_BYTES = 32 * 1024 * 1024
+
+/**
+ * Fetch recent CAMEO-coded events when the latest 15-minute export is small enough
+ * to unzip in the browser. Usually returns [] — full exports are large; this path is
+ * opportunistic and bounded for memory and latency.
+ */
+export async function fetchGdeltCameoEvents() {
+  try {
+    const upd = await fetch('https://data.gdeltproject.org/gdeltv2/lastupdate.txt', {
+      signal: AbortSignal.timeout(25_000),
+      redirect: 'manual',
+    })
+    if (!upd.ok || upd.status >= 300) return []
+
+    const updateText = await upd.text()
+    const lines = updateText.trim().split('\n')
+    const exportLine = lines.find((l) => l.includes('.export.CSV.zip'))
+    if (!exportLine) return []
+
+    const parts = exportLine.trim().split(/\s+/)
+    const zipUrl = parts[parts.length - 1]
+    if (!zipUrl || !GDELT_EXPORT_ZIP_RE.test(zipUrl)) return []
+
+    const head = await fetch(zipUrl, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(20_000),
+      redirect: 'manual',
+    })
+    if (!head.ok || head.status >= 300) return []
+
+    const len = parseInt(head.headers.get('content-length') || '0', 10)
+    if (!len || len > MAX_ZIP_BYTES) return []
+
+    const body = await fetch(zipUrl, {
+      signal: AbortSignal.timeout(90_000),
+      redirect: 'manual',
+    })
+    if (!body.ok || body.status >= 300) return []
+
+    const buf = new Uint8Array(await body.arrayBuffer())
+    if (buf.byteLength > MAX_ZIP_BYTES) return []
+
+    const files = unzipSync(buf)
+    const entryName = Object.keys(files).find((k) => /\.export\.csv$/i.test(k))
+    if (!entryName) return []
+
+    const text = strFromU8(files[entryName])
+    return parseGdeltCsvText(text, 500)
+  } catch (err) {
+    console.warn('[GDELT eventService] CAMEO export fetch skipped:', err?.message || err)
+    return []
+  }
+}
+
+export { classifyEvent, parseGdeltRow, CAMEO_LABELS, CONFLICT_CODES, THREAT_CODES, DIPLOMACY_CODES, MATERIAL_COOP_CODES }

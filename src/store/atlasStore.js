@@ -44,12 +44,14 @@ function persistBgmVolume(v) {
 }
 
 const DEFAULT_DATA_LAYERS = {
-  gdelt: true,      // Geopolitical events from GDELT 2.0
-  firms: true,      // NASA FIRMS active fires
-  usgs: true,       // USGS earthquakes
-  news: true,       // News articles from commercial APIs
-  gdacs: true,      // GDACS disasters
-  eonet: true,      // NASA EONET natural events
+  gdelt: true,           // Geopolitical events from GDELT 2.0
+  firms: true,           // NASA FIRMS active fires
+  usgs: true,            // USGS earthquakes
+  news: true,            // News articles from commercial APIs
+  gdacs: true,           // GDACS disasters
+  eonet: true,           // NASA EONET natural events
+  gdeltHeatmap: true,    // GDELT GEO PointHeatmap density overlay
+  gdeltChoropleth: false,// GDELT GEO per-country tone choropleth
 }
 
 function loadDataLayers() {
@@ -189,6 +191,8 @@ export const useAtlasStore = create((set, get) => ({
   eventMap: {},
   priorityCounts: { p1: 0, p2: 0, p3: 0 },
   selectedEvent: null,
+  /** `{ query, label?, dimension? }` — GDELT DOC analytics HUD; null when closed */
+  gdeltAnalytics: null,
   sourceStatuses: {},
   eventBusReady: false,
   priorityFilter: filters.priority,
@@ -495,6 +499,18 @@ export const useAtlasStore = create((set, get) => ({
   },
 
   setSelectedEvent: (event) => set({ selectedEvent: event }),
+
+  openGdeltAnalytics: (payload) => {
+    if (!payload || typeof payload.query !== 'string' || !payload.query.trim()) return
+    set({
+      gdeltAnalytics: {
+        query: payload.query.trim(),
+        label: payload.label || '',
+        dimension: payload.dimension || 'narrative',
+      },
+    })
+  },
+  closeGdeltAnalytics: () => set({ gdeltAnalytics: null }),
   setPriorityFilter: (v) => {
     localStorage.setItem('atlas_priority_filter', v)
     set({ priorityFilter: v })

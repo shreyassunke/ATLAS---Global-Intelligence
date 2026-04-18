@@ -1,14 +1,3 @@
-export const MARITIME_CHOKEPOINTS = [
-  { name: 'Strait of Hormuz', lat: 26.6, lng: 56.3 },
-  { name: 'Suez Canal', lat: 30.0, lng: 32.3 },
-  { name: 'Taiwan Strait', lat: 24.5, lng: 120.5 },
-  { name: 'Strait of Malacca', lat: 2.5, lng: 101.8 },
-  { name: 'Bab-el-Mandeb', lat: 12.6, lng: 43.3 },
-  { name: 'Bosphorus', lat: 41.1, lng: 29.0 },
-  { name: 'South China Sea', lat: 15.0, lng: 115.0 },
-  { name: 'Denmark Strait', lat: 66.0, lng: -27.0 },
-]
-
 export const NUCLEAR_FACILITIES = [
   { name: 'Zaporizhzhia', lat: 47.51, lng: 34.59, country: 'UA' },
   { name: 'Fukushima Daiichi', lat: 37.42, lng: 141.03, country: 'JP' },
@@ -40,6 +29,29 @@ export const ARC_TYPES = {
   CORRELATION: 'correlation',
   TRAJECTORY: 'trajectory',
   BLACKOUT: 'blackout',
+}
+
+/** Data-layer keys for GDELT GEO overlays (heatmap + choropleth). See `atlasStore` defaults. */
+export const GLOBE_OVERLAY_LAYER_KEYS = {
+  GDELT_HEATMAP: 'gdeltHeatmap',
+  GDELT_CHOROPLETH: 'gdeltChoropleth',
+}
+
+/**
+ * Closed ring of lat/lng/alt samples around a point (for Map3D polygon “blobs”).
+ * @param {number} radiusDeg approximate angular radius in degrees
+ */
+export function ringAroundLatLng(lat, lng, radiusDeg, steps = 14, altitudeM = 0) {
+  const ring = []
+  const cosLat = Math.cos((lat * Math.PI) / 180) || 1e-6
+  const n = Math.max(8, steps)
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2
+    const dlat = radiusDeg * Math.sin(a)
+    const dlng = (radiusDeg * Math.cos(a)) / cosLat
+    ring.push({ lat: lat + dlat, lng: lng + dlng, altitude: altitudeM })
+  }
+  return ring
 }
 
 export const ARC_LIMIT = 15

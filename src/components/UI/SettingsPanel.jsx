@@ -21,6 +21,8 @@ const TOGGLE_SETTINGS = [{ key: 'autoRotate', label: 'Auto-Rotate', icon: '↻' 
 
 const DATA_LAYER_TOGGLES = [
     { key: 'gdelt', label: 'GDELT Geopolitics', icon: '⚔', desc: 'Conflict, diplomacy, protests from GDELT 2.0' },
+    { key: 'gdeltHeatmap', label: 'GDELT Heatmap', icon: '🌡', desc: 'Event density heatmap from GDELT GEO PointHeatmap' },
+    { key: 'gdeltChoropleth', label: 'GDELT Country Tone', icon: '🗺', desc: 'Per-country average tone choropleth (GEO Country mode)' },
     { key: 'firms', label: 'NASA FIRMS Fires', icon: '🔥', desc: 'Active fire & thermal anomaly data' },
     { key: 'usgs', label: 'USGS Earthquakes', icon: '🌋', desc: 'Real-time seismic activity worldwide' },
     { key: 'gdacs', label: 'GDACS Disasters', icon: '🌊', desc: 'Global disaster alerts & coordination' },

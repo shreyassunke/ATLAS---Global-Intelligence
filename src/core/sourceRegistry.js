@@ -30,6 +30,7 @@ export const SOURCE_CATALOG = {
   'noaa-solar-wind': { name: 'NOAA Solar Wind',      module: MODULES.SPACE,         dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: false,  pollInterval: 300_000 },
   gdelt:            { name: 'GDELT',                  module: MODULES.NEWS,          dimension: DIMENSIONS.NARRATIVE,    authoritative: false, requiresKey: false,  pollInterval: 300_000 },
   'gdelt-events':   { name: 'GDELT Events',          module: MODULES.CONFLICT,      dimension: DIMENSIONS.SAFETY,       authoritative: false, requiresKey: false,  pollInterval: 900_000 },
+  'gdelt-cameo':    { name: 'GDELT CAMEO',           module: MODULES.CONFLICT,      dimension: DIMENSIONS.SAFETY,       authoritative: false, requiresKey: false,  pollInterval: 1_200_000 },
   firms:            { name: 'NASA FIRMS',             module: MODULES.ENVIRONMENT,   dimension: DIMENSIONS.ENVIRONMENT,  authoritative: true,  requiresKey: true,   pollInterval: 600_000 },
   ucdp:             { name: 'UCDP Conflict',          module: MODULES.CONFLICT,      dimension: DIMENSIONS.SAFETY,       authoritative: false, requiresKey: false,  pollInterval: 600_000 },
   coingecko:        { name: 'CoinGecko',              module: MODULES.FINANCIAL,     dimension: DIMENSIONS.ECONOMY,      authoritative: false, requiresKey: false,  pollInterval: 300_000 },

@@ -2,12 +2,14 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useAtlasStore } from '../../store/atlasStore'
 import { CATEGORIES } from '../../utils/categoryColors'
 import { extractYouTubeVideoId } from '../../utils/youtube'
+import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
 
 export default function NewsCard() {
   const selectedMarker = useAtlasStore((s) => s.selectedMarker)
   const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
   const openStreetView = useAtlasStore((s) => s.openStreetView)
   const openYouTubeEmbed = useAtlasStore((s) => s.openYouTubeEmbed)
+  const openGdeltAnalytics = useAtlasStore((s) => s.openGdeltAnalytics)
   const mobileMode = useAtlasStore((s) => s.mobileMode)
 
   return (
@@ -113,7 +115,7 @@ export default function NewsCard() {
               )}
               <span className="opacity-50">•</span>
               <span>
-                {new Date(selectedMarker.publishedAt).toLocaleTimeString([], {
+                {new Date(selectedMarker.publishedAt || selectedMarker.timestamp || Date.now()).toLocaleTimeString([], {
                   hour: '2-digit',
                   minute: '2-digit',
                 })}
@@ -194,6 +196,25 @@ export default function NewsCard() {
                 )}
               </div>
             ) : null}
+
+            {Array.isArray(selectedMarker.corroborationSources) && (
+              <button
+                type="button"
+                onClick={() =>
+                  openGdeltAnalytics({
+                    query: buildGdeltDocQuery({
+                      title: selectedMarker.title,
+                      dimension: selectedMarker.dimension,
+                    }),
+                    label: selectedMarker.title,
+                    dimension: selectedMarker.dimension,
+                  })
+                }
+                className="w-full rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-sky-300/90 transition hover:bg-sky-500/20 cursor-pointer"
+              >
+                ◎ GDELT Analyze
+              </button>
+            )}
 
             {/* Importance indicator */}
             <div className="flex gap-1.5 pt-2">

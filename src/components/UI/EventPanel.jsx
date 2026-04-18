@@ -5,6 +5,7 @@ import {
   PRIORITIES, PRIORITY_LABELS, formatToneScore
 } from '../../core/eventSchema'
 import CausalThread from './CausalThread'
+import { buildGdeltDocQuery } from '../../services/gdelt/analyticsService'
 
 const IconStreetView = () => (
   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -28,6 +29,7 @@ function timeAgo(dateStr) {
 export default function EventPanel() {
   const selectedEvent = useAtlasStore((s) => s.selectedEvent)
   const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
+  const openGdeltAnalytics = useAtlasStore((s) => s.openGdeltAnalytics)
 
   return (
     <AnimatePresence>
@@ -180,7 +182,26 @@ export default function EventPanel() {
             {/* Causal thread — Related Signals section */}
             <CausalThread event={selectedEvent} />
 
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {Array.isArray(selectedEvent.corroborationSources) && (
+                <button
+                  type="button"
+                  className="event-source-link"
+                  style={{ flex: 1, minWidth: '120px', cursor: 'pointer', border: 'none', background: 'rgba(55, 138, 221, 0.12)' }}
+                  onClick={() => {
+                    openGdeltAnalytics({
+                      query: buildGdeltDocQuery({
+                        title: selectedEvent.title,
+                        dimension: selectedEvent.dimension,
+                      }),
+                      label: selectedEvent.title,
+                      dimension: selectedEvent.dimension,
+                    })
+                  }}
+                >
+                  ◎ GDELT Analyze
+                </button>
+              )}
               {selectedEvent.sourceUrl && (
                 <a
                   href={selectedEvent.sourceUrl}
