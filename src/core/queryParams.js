@@ -25,7 +25,7 @@ export const QUERY_SCHEMA = {
  *
  * @param {Object} state
  * @param {Set|Array} state.activeDimensions - Active dimension keys
- * @param {string} state.priorityFilter - 'p1' | 'p1p2' | 'all'
+ * @param {string} state.priorityFilter - 'all' (default) | 'p1' | 'p1p2'
  * @param {string} state.timeFilter - 'live' | '24h' | '7d' | '30d' | 'custom'
  * @param {string} [state.toneFilter] - 'negative' | 'neutral' | 'positive'
  * @param {{ lat: number, lng: number, radiusKm: number }} [state.region]
@@ -42,8 +42,8 @@ export function serializeFilters(state) {
     params.set('dim', dims.join(','))
   }
 
-  // Priority
-  if (state.priorityFilter && state.priorityFilter !== 'p1') {
+  // Priority — default is `all`; encode any non-default so `p1` round-trips
+  if (state.priorityFilter && state.priorityFilter !== 'all') {
     params.set('pri', state.priorityFilter)
   }
 

@@ -19,7 +19,8 @@ import StreetViewOverlay from './components/UI/StreetViewOverlay'
 import YouTubeEmbedOverlay from './components/UI/YouTubeEmbedOverlay'
 import SettingsPanel from './components/UI/SettingsPanel'
 import DimensionFilters from './components/UI/DimensionFilters'
-import FetchStatusOverlay from './components/UI/FetchStatusOverlay'
+import FetchStatusOverlay, { GdeltConnectingBanner } from './components/UI/FetchStatusOverlay'
+import SearchResultCard from './components/UI/SearchResultCard'
 import { usePreferencesSync } from './hooks/usePreferencesSync'
 import LandingPage from './components/Landing/LandingPage'
 
@@ -217,6 +218,7 @@ export default function App() {
                 <GoogleGlobe onGlobeReady={() => setGlobeReady(true)} />
               )}
             </Suspense>
+            <GdeltConnectingBanner />
             <AnimatePresence>
               {!hudHidden && (
                 <motion.div
@@ -256,6 +258,7 @@ export default function App() {
                   <LiveTicker />
                   <SettingsPanel />
                   <FetchStatusOverlay />
+                  <SearchResultCard />
                 </motion.div>
               )}
             </AnimatePresence>

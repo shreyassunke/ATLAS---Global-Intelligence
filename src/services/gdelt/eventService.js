@@ -67,8 +67,21 @@ const COL = {
   SOURCEURL: 60,
 }
 
+/** Valid CAMEO root codes are two-digit strings `01`–`20` per the v2 codebook. */
+const CAMEO_ROOT_RE = /^(0[1-9]|1[0-9]|20)$/
+
 /**
- * Parse a single GDELT 2.0 event CSV row (tab-delimited)
+ * Parse a single GDELT 2.0 event CSV row (tab-delimited).
+ *
+ * Throttle notes
+ * --------------
+ * Earlier revisions restricted CAMEO to ~11 of the 20 root families and
+ * required `numMentions >= 3`, which silently dropped 60-80% of rows per
+ * 15-minute export and left the globe with only a handful of pins. We now
+ * accept every valid CAMEO root so the globe reflects the full GDELT
+ * firehose; `cameoToDimension` already maps all 20 root families to an
+ * ATLAS dimension (with a NARRATIVE fallback for categories we don't
+ * explicitly classify).
  */
 function parseGdeltRow(columns) {
   const lat = parseFloat(columns[COL.ActionGeo_Lat])
@@ -84,14 +97,13 @@ function parseGdeltRow(columns) {
   const numMentions = parseInt(columns[COL.NumMentions]) || 0
   const numSources = parseInt(columns[COL.NumSources]) || 0
 
-  // Filter: only keep events with meaningful CAMEO codes
-  if (!CONFLICT_CODES.has(cameoRoot) && !THREAT_CODES.has(cameoRoot) && !DIPLOMACY_CODES.has(cameoRoot) && !MATERIAL_COOP_CODES.has(cameoRoot)) {
-    return null
-  }
+  // Accept every valid CAMEO root; `cameoToDimension` already handles all 20.
+  if (!CAMEO_ROOT_RE.test(cameoRoot)) return null
 
-  // Skip low-signal events (cooperation/aid rows are often widely syndicated → lower threshold)
-  const minMentions = MATERIAL_COOP_CODES.has(cameoRoot) ? 2 : 3
-  if (numMentions < minMentions) return null
+  // Require at least one mention (the CSV has rows with 0 mentions for
+  // "theoretical" events constructed from context — those rarely have a
+  // real geocode anyway).
+  if (numMentions < 1) return null
 
   const classification = classifyEvent(quadClass, cameoRoot, goldstein)
 
@@ -258,8 +270,17 @@ const GDELT_EXPORT_ZIP_RE = /^https:\/\/data\.gdeltproject\.org\/gdeltv2\/\d{14}
  */
 const MAX_ZIP_BYTES = 128 * 1024 * 1024
 
-/** Maximum CAMEO rows we parse per invocation — anything more is noise. */
-const MAX_CAMEO_ROWS = 500
+/**
+ * Maximum CAMEO rows we parse per invocation.
+ *
+ * The raw 15-minute export typically holds 5k-30k rows globally. We parse
+ * a large slice so the globe can show the full firehose of geocoded events
+ * while leaving the row-level filter (valid CAMEO root + valid lat/lng) to
+ * cull obviously noisy rows. The globe rendering layer caps visible markers
+ * further, so raising this doesn't risk GPU overload — it just ensures the
+ * worker has a rich enough pool to dedup, cluster, and render from.
+ */
+const MAX_CAMEO_ROWS = 5000
 
 /**
  * Resolve the latest 15-minute `.export.CSV.zip` URL. Prefers
@@ -307,6 +328,24 @@ async function resolveLatestExportZipUrl() {
 }
 
 /**
+ * Parse `YYYYMMDDHHMMSS` from an official GDELT v2 `.export.CSV.zip` URL → UTC ms.
+ * @param {string} zipUrl
+ * @returns {number|null}
+ */
+export function parseGdeltExportZipTimestampMs(zipUrl) {
+  const m = String(zipUrl || '').match(/\/(\d{14})\.export\.CSV\.zip$/i)
+  if (!m) return null
+  const s = m[1]
+  const y = +s.slice(0, 4)
+  const mo = +s.slice(4, 6) - 1
+  const d = +s.slice(6, 8)
+  const hh = +s.slice(8, 10)
+  const mm = +s.slice(10, 12)
+  const ss = +s.slice(12, 14)
+  return Date.UTC(y, mo, d, hh, mm, ss)
+}
+
+/**
  * Fetch recent CAMEO-coded events. Streams the ZIP body, decompresses into
  * tab-separated CSV, and stops parsing after `MAX_CAMEO_ROWS` valid rows.
  *
@@ -351,7 +390,11 @@ export async function fetchGdeltCameoEvents() {
     if (!entryName) return []
 
     const text = strFromU8(files[entryName])
-    return parseGdeltCsvText(text, MAX_CAMEO_ROWS)
+    const exportTsMs = parseGdeltExportZipTimestampMs(zipUrl) ?? Date.now()
+    return parseGdeltCsvText(text, MAX_CAMEO_ROWS).map((row) => ({
+      ...row,
+      _exportTsMs: exportTsMs,
+    }))
   } catch (err) {
     console.warn('[GDELT eventService] CAMEO export fetch skipped:', err?.message || err)
     return []

@@ -4,6 +4,7 @@ import { useAtlasStore } from '../../store/atlasStore'
 import SourceSearch from '../Onboarding/SourceSearch'
 import HeaderUserMenu from './HeaderUserMenu'
 import BgmTrackMenu from './BgmTrackMenu'
+import HeaderSearchBar from './HeaderSearchBar'
 import { AtlasWordmark } from './AtlasWordmark'
 import { MissionClock } from './ClockOverlay'
 
@@ -148,6 +149,8 @@ export default function Header({ hudHidden = false, onToggleHud, onToggleFilters
               <span className="hud-loading-pulse">Syncing</span>
             )}
           </div>
+
+          <HeaderSearchBar />
         </div>
 
         <div className="hud-header-center-zone">

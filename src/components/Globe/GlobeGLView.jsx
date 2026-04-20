@@ -575,6 +575,25 @@ export default function GlobeGLView({ onGlobeReady }) {
             const c = globe.controls()
             if (c) c.autoRotate = useAtlasStore.getState().getEffectiveSetting('autoRotate')
             useAtlasStore.getState().setSelectedMarker(null)
+            useAtlasStore.getState().clearSearchHighlight()
+        })
+
+        // ── Register place-search fly-to callback (Header search bar) ──
+        // globe.gl uses altitude in Earth radii; we pick a city-level default
+        // and tighten it when the Places viewport bbox is narrow so the
+        // framing roughly matches Google Earth's behaviour.
+        useAtlasStore.getState().setOnFlyToLocation((target) => {
+            if (!target) return
+            const { lat, lng, viewport } = target
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+            let altitude = 0.6
+            if (viewport) {
+                const latSpan = Math.abs(viewport.north - viewport.south)
+                const lngSpan = Math.abs(viewport.east - viewport.west)
+                const span = Math.max(latSpan, lngSpan)
+                altitude = Math.max(0.08, Math.min(1.6, span / 50))
+            }
+            globe.pointOfView({ lat, lng, altitude }, 1400)
         })
 
         // Resize
@@ -612,6 +631,7 @@ export default function GlobeGLView({ onGlobeReady }) {
             clearTimeout(readyTimer)
             if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current)
             useAtlasStore.getState().setOnResetView(null)
+            useAtlasStore.getState().setOnFlyToLocation(null)
             if (globeRef.current) {
                 globeRef.current._destructor?.()
                 globeRef.current = null

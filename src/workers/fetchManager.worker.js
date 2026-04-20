@@ -9,9 +9,6 @@ try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',
 const INITIAL_BACKOFF = 5000
 const MAX_BACKOFF = 300_000
 
-/** GDELT asks for ≥5s between requests — stay conservative for chained GEO calls. */
-const GDELT_REQUEST_GAP_MS = 5500
-
 const moduleState = {}
 let envKeys = {}
 
@@ -123,10 +120,6 @@ const COUNTRY_CENTROIDS = {
   ZM:[-15,30],ZW:[-20,30],
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 /** Map GDELT ArtList `sourcecountry` (English labels) → ISO2 for centroid lookup. Keys: lowercase, no spaces. */
 const GDELT_COUNTRY_NAME_TO_ISO = {
   afghanistan: 'AF', albania: 'AL', algeria: 'DZ', angola: 'AO', argentina: 'AR', armenia: 'AM',
@@ -202,15 +195,6 @@ function inferDocArticleDimension(article) {
     if (re.test(blob)) return dimension
   }
   return 'narrative'
-}
-
-function gdeltSqlDateToIso(sqlDate) {
-  const s = String(sqlDate || '')
-  if (s.length < 8) return new Date().toISOString()
-  const y = s.slice(0, 4)
-  const mo = s.slice(4, 6)
-  const d = s.slice(6, 8)
-  return `${y}-${mo}-${d}T12:00:00.000Z`
 }
 
 /** One GEO request per dimension (query breadth), merged in the worker with rate limiting. */
@@ -1047,14 +1031,18 @@ const SOURCE_CONFIGS = {
     pollInterval: 300_000,
     gdeltDocChain: GDELT_DOC_DIM_QUERIES,
   },
-  'gdelt-events': {
+  // `gdelt-events` (GDELT GEO 2.0 API — PointData/GeoJSON) is disabled: the
+  // `https://api.gdeltproject.org/api/v2/geo/geo` endpoint currently returns
+  // HTTP 404 for every query (including the examples from GDELT's own docs)
+  // while the upstream service is down. Leaving the source active just
+  // burned the shared rate-limit budget with failing legs, which is what
+  // starved the DOC chain and left the globe empty. Re-enable once GDELT
+  // restores the GEO endpoint.
+  'gdelt-cameo': {
+    // GDELT publishes a new 15-minute `.export.CSV.zip` every quarter hour;
+    // poll on that cadence so the globe always mirrors the latest firehose.
     format: 'json',
     pollInterval: 900_000,
-    gdeltGeoChain: GDELT_GEO_DIM_QUERIES,
-  },
-  'gdelt-cameo': {
-    format: 'json',
-    pollInterval: 1_200_000,
   },
   'gdelt-vgkg': {
     format: 'json',
@@ -1258,7 +1246,9 @@ async function fetchSource(sourceId) {
     try {
       const rows = await fetchGdeltCameoEvents()
       const events = rows.map((row) => {
-        const ts = Date.parse(gdeltSqlDateToIso(row.sqlDate))
+        const ts = typeof row._exportTsMs === 'number' && Number.isFinite(row._exportTsMs)
+          ? row._exportTsMs
+          : Date.now()
         const sev = Math.min(5, Math.max(1, row.severity || 1))
         const priority = sev >= 4 ? 'p1' : sev >= 2 ? 'p2' : 'p3'
         return makeEvent({
@@ -1272,12 +1262,17 @@ async function fetchSource(sourceId) {
           corroborationCount: row.corroborationCount || 1,
           corroborationSources: ['gdelt-cameo'],
           title: row.title,
-          detail: `${row.detail} Mentions: ${row.numMentions}. Actors: ${[row.actor1, row.actor2].filter(Boolean).join(' → ') || 'n/a'}.`,
+          detail: `${row.detail} SQLDATE: ${row.sqlDate || '—'}. Mentions: ${row.numMentions}. Actors: ${[row.actor1, row.actor2].filter(Boolean).join(' → ') || 'n/a'}.`,
           source: 'GDELT',
           sourceUrl: row.sourceUrl || 'https://www.gdeltproject.org',
           tags: ['gdelt', 'cameo', `cameo${row.cameoRoot || ''}`, typeof row.quadClass === 'number' ? `qc${row.quadClass}` : ''].filter(Boolean),
-          timestamp: gdeltSqlDateToIso(row.sqlDate),
-          ttl: 1200,
+          timestamp: new Date(ts).toISOString(),
+          // Keep CAMEO rows alive for 2 hours — matches the "Live" HUD window
+          // (`TIME_FILTER_MAX_AGE_MS.live`) so the globe always shows a dense,
+          // rolling two-hour backlog of geocoded events across 8 consecutive
+          // 15-minute polls. Older rows are culled either by TTL here or by
+          // the globe's own age filter.
+          ttl: 7200,
         })
       })
       state.backoff = INITIAL_BACKOFF
@@ -1307,12 +1302,20 @@ async function fetchSource(sourceId) {
     if (Array.isArray(config.gdeltDocChain) && config.gdeltDocChain.length > 0) {
       // A1/A2: per-dimension ArtList requests, each with its own AbortController
       // timeout; a single leg failure never nukes the rest.
+      //
+      // Request pacing is handled by the shared gate inside `fetchGdeltJson`
+      // (gdeltHttp.js). That gate is cross-source, so DOC legs stay spaced
+      // even while analytics-panel queries or summary/context calls from the
+      // UI hit GDELT concurrently.
       const merged = { articles: [] }
       const legErrors = []
       for (let i = 0; i < config.gdeltDocChain.length; i++) {
-        if (i > 0) await sleep(GDELT_REQUEST_GAP_MS)
         const { query, dimension } = config.gdeltDocChain[i]
-        const docUrl = `${GDELT_DOC_BASE}?query=${encodeURIComponent(query)}&mode=ArtList&maxrecords=15&format=json&sort=DateDesc`
+        // `maxrecords=250` is the DOC API ceiling. We fan out per-dimension so
+        // the union across 6 legs is up to ~1.5k articles, which maps to a
+        // dense field of country-centroid pins even with DOC's country-level
+        // resolution (sourcecountry → centroid).
+        const docUrl = `${GDELT_DOC_BASE}?query=${encodeURIComponent(query)}&mode=ArtList&maxrecords=250&format=json&sort=DateDesc`
         const controller = new AbortController()
         const timer = setTimeout(() => controller.abort(), GDELT_LEG_TIMEOUT_MS)
         try {
@@ -1342,11 +1345,10 @@ async function fetchSource(sourceId) {
       data = merged
     } else if (Array.isArray(config.gdeltGeoChain) && config.gdeltGeoChain.length > 0) {
       // A2: per-leg try/catch + AbortController; partial failures no longer nuke
-      // the whole chain.
+      // the whole chain. Pacing handled by the shared `fetchGdeltText` gate.
       const merged = { type: 'FeatureCollection', features: [] }
       const legErrors = []
       for (let i = 0; i < config.gdeltGeoChain.length; i++) {
-        if (i > 0) await sleep(GDELT_REQUEST_GAP_MS)
         const { query, dimension } = config.gdeltGeoChain[i]
         const geoUrl = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodeURIComponent(query)}&mode=PointData&format=GeoJSON&timespan=60min&maxpoints=250`
         const controller = new AbortController()

@@ -37,6 +37,62 @@ function statusColor(row) {
   return '#4ade80'
 }
 
+/**
+ * Shown on first globe load while GDELT workers warm up (~30–40s DOC chain / ZIP).
+ * Hides when either `gdelt` or `gdelt-cameo` reports events, or after 60s.
+ */
+export function GdeltConnectingBanner() {
+  const [dismissed, setDismissed] = useState(false)
+  const [statuses, setStatuses] = useState(() => getSourceStatuses())
+
+  useEffect(() => {
+    const unsub = subscribeToSourceStatus(setStatuses)
+    const t = setTimeout(() => setDismissed(true), 60_000)
+    return () => {
+      unsub?.()
+      clearTimeout(t)
+    }
+  }, [])
+
+  const gdelt = statuses.gdelt
+  const cameo = statuses['gdelt-cameo']
+  const hasData =
+    (typeof gdelt?.eventCount === 'number' && gdelt.eventCount > 0) ||
+    (typeof cameo?.eventCount === 'number' && cameo.eventCount > 0)
+
+  useEffect(() => {
+    if (hasData) setDismissed(true)
+  }, [hasData])
+
+  if (dismissed) return null
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'fixed',
+        left: '50%',
+        bottom: 24,
+        transform: 'translateX(-50%)',
+        zIndex: 9999,
+        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        fontSize: 12,
+        color: 'rgba(226, 232, 240, 0.95)',
+        background: 'rgba(15, 23, 42, 0.82)',
+        border: '1px solid rgba(148, 163, 184, 0.35)',
+        borderRadius: 9999,
+        padding: '8px 16px',
+        backdropFilter: 'blur(8px)',
+        pointerEvents: 'none',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+      }}
+    >
+      Connecting to GDELT… (first load can take ~30s)
+    </div>
+  )
+}
+
 export default function FetchStatusOverlay() {
   const [enabled] = useState(isDebugEnabled)
   const [collapsed, setCollapsed] = useState(false)

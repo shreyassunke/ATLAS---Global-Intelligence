@@ -60,6 +60,25 @@ const TIME_FILTER_MAX_AGE_MS = {
   '30d': 30 * 24 * 3600_000,
 }
 
+/**
+ * Hard cap on the number of individual `<Marker3D>` elements we mount at
+ * once. With the GDELT firehose unleashed we can have 5-10k geocoded events
+ * in-memory; Map3D handles overlap via `OPTIONAL_AND_HIDES_LOWER_PRIORITY`
+ * but still pays a per-marker DOM cost. 2.5k is a good balance on the
+ * modern browsers we target: dense enough to feel "populated" everywhere
+ * there's news, cheap enough to keep the 60fps camera path responsive.
+ * When the pool exceeds the cap we keep the highest-severity, most-recent
+ * events (see `rankForGlobeRender`).
+ */
+const MAX_GLOBE_MARKERS = 2500
+
+/**
+ * O(n²) convex-hull clustering is fine up to ~2k events; beyond that we
+ * down-sample the list we feed the clusterer so the main thread doesn't
+ * stutter while the camera moves.
+ */
+const MAX_CLUSTER_INPUTS = 2000
+
 function convexHull(points) {
   if (points.length < 3) return points
   const sorted = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1])
@@ -225,6 +244,62 @@ function geoJsonToOuterRings(geometry) {
     .filter((ring) => ring.length >= 3)
 }
 
+/**
+ * ATLAS place-mark head: a minimal HUD reticle — outer white ring,
+ * inner faint ring, cyan accent dot. The sprite is perfectly symmetric
+ * around the canvas center so `Marker3D` anchors it cleanly to its
+ * 3D position. In-world it sits 140 m above the lat/lng with a cyan
+ * stem linking it to the ground, so as the camera tilts/zooms/orbits
+ * the whole assembly moves together and the user's eye always tracks
+ * the stem's ground contact — no parallax swim like a sprite-only pin.
+ */
+let _searchMarkSprite = null
+function searchMarkIconDataUrl() {
+  if (_searchMarkSprite) return _searchMarkSprite
+  const size = 64
+  const dpr = 2
+  const c = document.createElement('canvas')
+  c.width = size * dpr
+  c.height = size * dpr
+  const ctx = c.getContext('2d')
+  ctx.scale(dpr, dpr)
+
+  const cx = size / 2
+  const cy = size / 2
+
+  // Outer cyan halo — soft glow so the head reads above the stem.
+  ctx.beginPath()
+  ctx.arc(cx, cy, 12, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(0, 207, 255, 0.12)'
+  ctx.fill()
+
+  // Outer white ring — the primary visual anchor.
+  ctx.beginPath()
+  ctx.arc(cx, cy, 9, 0, Math.PI * 2)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.94)'
+  ctx.lineWidth = 1.6
+  ctx.stroke()
+
+  // Inner faint ring — adds HUD depth without shouting.
+  ctx.beginPath()
+  ctx.arc(cx, cy, 5, 0, Math.PI * 2)
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)'
+  ctx.lineWidth = 1
+  ctx.stroke()
+
+  // Center dot — ATLAS accent cyan, outlined for crispness on any basemap.
+  ctx.beginPath()
+  ctx.arc(cx, cy, 2.2, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(0, 207, 255, 1)'
+  ctx.fill()
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
+  ctx.lineWidth = 0.7
+  ctx.stroke()
+
+  _searchMarkSprite = c.toDataURL('image/png')
+  return _searchMarkSprite
+}
+
 function nuclearIconDataUrl() {
   const c = document.createElement('canvas')
   c.width = 20
@@ -347,9 +422,12 @@ function InnerMap({ onGlobeReady }) {
   const staticIcons = useMemo(
     () => ({
       nuclear: nuclearIconDataUrl(),
+      searchPin: searchMarkIconDataUrl(),
     }),
     [],
   )
+
+  const searchHighlight = useAtlasStore((s) => s.searchHighlight)
   const readyRef = useRef(false)
   const introStartedRef = useRef(false)
   const lastZoomEmitRef = useRef(0)
@@ -375,34 +453,64 @@ function InnerMap({ onGlobeReady }) {
 
   const globePlottedEvents = useMemo(() => {
     const list = []
-    let noCoord = 0, noLayer = 0, layerOff = 0, dimOff = 0, prioOff = 0, tooOld = 0
     const maxAgeMs = TIME_FILTER_MAX_AGE_MS[timeFilter] ?? TIME_FILTER_MAX_AGE_MS.live
     const now = Date.now()
     for (const evt of events) {
-      if (evt.lat == null || evt.lng == null) { noCoord++; continue }
+      if (evt.lat == null || evt.lng == null) continue
       const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
-      if (!layerKey) { noLayer++; continue }
-      if (dataLayers[layerKey] === false) { layerOff++; continue }
-      if (!activeDimensions.has(evt.dimension)) { dimOff++; continue }
-      if (priorityFilter === 'p1' && evt.priority !== 'p1') { prioOff++; continue }
-      if (priorityFilter === 'p1p2' && evt.priority === 'p3') { prioOff++; continue }
+      if (!layerKey) continue
+      if (dataLayers[layerKey] === false) continue
+      if (!activeDimensions.has(evt.dimension)) continue
+      if (priorityFilter === 'p1' && evt.priority !== 'p1') continue
+      if (priorityFilter === 'p1p2' && evt.priority === 'p3') continue
       // Drop markers older than the HUD time window so the globe reflects the
       // selected tier (Live / 24h / 7d / 30d) instead of the raw TTL buffer.
+      // Use max(timestamp, fetchedAt) so low-precision upstream stamps (e.g.
+      // CAMEO noon-UTC) cannot cull fresh ingests; TTL still governs true staleness.
       const tsMs = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
-      const refMs = Number.isFinite(tsMs)
-        ? tsMs
-        : (evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN)
-      if (Number.isFinite(refMs) && now - refMs > maxAgeMs) { tooOld++; continue }
+      const fMs = evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN
+      const refMs = Math.max(
+        Number.isFinite(tsMs) ? tsMs : -Infinity,
+        Number.isFinite(fMs) ? fMs : -Infinity,
+      )
+      if (Number.isFinite(refMs) && refMs > -Infinity && now - refMs > maxAgeMs) continue
       list.push(evt)
     }
-    // #region agent log
-    try { fetch('http://127.0.0.1:7897/ingest/4068bc9a-6323-4a56-a79a-75d6b868c769',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'894d50'},body:JSON.stringify({sessionId:'894d50',location:'GoogleGlobe.jsx:globePlottedEvents',message:'L5 plotted events memo',data:{inputEvents:events.length,plotted:list.length,filteredOut:{noCoord,noLayer,layerOff,dimOff,prioOff,tooOld},activeDimensions:Array.from(activeDimensions||[]),priorityFilter,timeFilter,dataLayers,firstEventSource:events[0]?.source||null,firstEventDim:events[0]?.dimension||null},hypothesisId:'H4',timestamp:Date.now()})}).catch(()=>{}) } catch(e){}
-    // #endregion
-    return list
+
+    if (list.length <= MAX_GLOBE_MARKERS) return list
+
+    // Rank so the visible subset favours breaking + fresh signals over
+    // dense old-news clutter. Score combines priority tier, severity, and
+    // recency — all normalised so none dominates on its own.
+    const priorityRank = { p1: 3, p2: 2, p3: 1 }
+    const scored = list.map((evt) => {
+      const tsRaw = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
+      const fAt = evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN
+      const ts = Math.max(
+        Number.isFinite(tsRaw) ? tsRaw : -Infinity,
+        Number.isFinite(fAt) ? fAt : -Infinity,
+      )
+      const tsForRank = Number.isFinite(ts) && ts > -Infinity ? ts : now
+      const ageMin = Math.max(0, (now - tsForRank) / 60_000)
+      // Exponential decay ~1h half-life.
+      const recency = Math.exp(-ageMin / 60)
+      const sev = (evt.severity || 1) / 5
+      const pri = priorityRank[evt.priority] || 1
+      return { evt, score: recency * 2 + sev * 1.5 + pri }
+    })
+    scored.sort((a, b) => b.score - a.score)
+    return scored.slice(0, MAX_GLOBE_MARKERS).map((s) => s.evt)
   }, [events, dataLayers, activeDimensions, priorityFilter, timeFilter])
 
   const clusterLayers = useMemo(() => {
-    const clusters = clusterEvents(globePlottedEvents, 200, 5)
+    // Cap the clusterer input so the O(n²) pass stays bounded when the
+    // worker has delivered a particularly rich export. The ranking already
+    // front-loads the freshest/most-severe events, so a head-slice is a
+    // faithful approximation of the dense pool.
+    const clusterInput = globePlottedEvents.length > MAX_CLUSTER_INPUTS
+      ? globePlottedEvents.slice(0, MAX_CLUSTER_INPUTS)
+      : globePlottedEvents
+    const clusters = clusterEvents(clusterInput, 200, 5)
     return clusters.map((cluster) => {
       const dimensionColor = DIMENSION_COLORS[cluster.dimension] || '#1a90ff'
       const points = cluster.events.map((e) => [e.lng, e.lat])
@@ -622,9 +730,53 @@ function InnerMap({ onGlobeReady }) {
       }
       idleSpinGateRef.current = useAtlasStore.getState().getEffectiveSetting('autoRotate')
       useAtlasStore.getState().setSelectedMarker(null)
+      useAtlasStore.getState().clearSearchHighlight()
     })
     return () => {
       useAtlasStore.getState().setOnResetView(null)
+    }
+  }, [])
+
+  // Bridge the header place-search to Map3D's camera path. The range is
+  // derived from the returned viewport bbox (cities → ~20km, countries →
+  // ~800km) so the framing matches what Google Earth shows for the same
+  // query. No viewport → fall back to a modest city-level zoom.
+  useEffect(() => {
+    useAtlasStore.getState().setOnFlyToLocation((target) => {
+      const map = map3dRef.current
+      if (!map?.flyCameraTo || !target) return
+      const { lat, lng, viewport } = target
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+
+      let range
+      if (viewport) {
+        const latSpanDeg = Math.abs(viewport.north - viewport.south)
+        const lngSpanDeg = Math.abs(viewport.east - viewport.west)
+        const cosLat = Math.max(0.15, Math.abs(Math.cos((lat * Math.PI) / 180)))
+        // Convert the larger of the two spans to meters, then pad so the
+        // bbox sits well inside the viewport at the chosen tilt.
+        const latSpanM = latSpanDeg * 111_000
+        const lngSpanM = lngSpanDeg * 111_000 * cosLat
+        const maxSpanM = Math.max(latSpanM, lngSpanM)
+        range = Math.max(1500, Math.min(RANGE_MAX_M * 0.5, maxSpanM * 2.3))
+      } else {
+        range = 22_000
+      }
+
+      idleSpinGateRef.current = false
+      map.flyCameraTo({
+        endCamera: {
+          center: { lat, lng, altitude: 0 },
+          range,
+          heading: 0,
+          tilt: 45,
+          roll: 0,
+        },
+        durationMillis: 1500,
+      })
+    })
+    return () => {
+      useAtlasStore.getState().setOnFlyToLocation(null)
     }
   }, [])
 
@@ -701,6 +853,35 @@ function InnerMap({ onGlobeReady }) {
     const t = setTimeout(() => finalizeReady(), 5000)
     return () => clearTimeout(t)
   }, [finalizeReady])
+
+  /**
+   * Convert the stored Nominatim boundary GeoJSON into an array of
+   * Map3D-ready rings (`Array<{lat,lng,altitude}>`). Matches Google
+   * Earth's "official border" behaviour: only admin-area results carry
+   * a `boundary`, so for landmarks / businesses this returns `null` and
+   * nothing is drawn beyond the pin. No bbox rectangle is ever painted.
+   */
+  const searchHighlightRings = useMemo(() => {
+    const boundary = searchHighlight?.boundary
+    if (!boundary || !Array.isArray(boundary.coordinates)) return null
+
+    const rings = []
+    const pushRing = (ring) => {
+      const pts = (ring || [])
+        .filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+        .map(([rLng, rLat]) => ({ lat: rLat, lng: rLng, altitude: 40 }))
+      if (pts.length >= 3) rings.push(pts)
+    }
+
+    if (boundary.type === 'Polygon') {
+      for (const ring of boundary.coordinates) pushRing(ring)
+    } else if (boundary.type === 'MultiPolygon') {
+      for (const poly of boundary.coordinates) {
+        for (const ring of poly || []) pushRing(ring)
+      }
+    }
+    return rings.length > 0 ? { rings } : null
+  }, [searchHighlight])
 
   const heatOn = dataLayers?.gdeltHeatmap !== false
   const choroOn = dataLayers?.gdeltChoropleth === true
@@ -857,6 +1038,63 @@ function InnerMap({ onGlobeReady }) {
             }}
           />
         ))}
+
+        {vectorLayersReady &&
+          searchHighlightRings?.rings.map((ring, idx) => (
+            <Polyline3D
+              key={`atlas-search-highlight-ring-${idx}`}
+              coordinates={ring}
+              strokeColor="rgba(0, 207, 255, 0.9)"
+              strokeWidth={2.5}
+              outerColor="rgba(0, 207, 255, 0.18)"
+              outerWidth={1}
+            />
+          ))}
+
+        {searchHighlight && Number.isFinite(searchHighlight.lat) && Number.isFinite(searchHighlight.lng) && (
+          <React.Fragment key="atlas-search-highlight-group">
+            {/*
+             * ATLAS place-mark is a head + stem. The stem is a real 3D
+             * polyline from the terrain surface up to the reticle, both
+             * endpoints using RELATIVE_TO_GROUND so the whole assembly
+             * rides the terrain as tiles stream in — no parallax drift
+             * like CLAMP_TO_GROUND would cause, and the user always sees
+             * the stem touching the exact ground point under camera
+             * tilt/zoom/orbit.
+             */}
+            {createElement('gmp-polyline-3d', {
+              key: 'atlas-search-stem',
+              altitudeMode: AltitudeMode.RELATIVE_TO_GROUND,
+              strokeColor: 'rgba(0, 207, 255, 0.85)',
+              strokeWidth: 2,
+              outerColor: 'rgba(0, 207, 255, 0.18)',
+              outerWidth: 1,
+              drawsOccludedSegments: true,
+              coordinates: [
+                { lat: searchHighlight.lat, lng: searchHighlight.lng, altitude: 0 },
+                { lat: searchHighlight.lat, lng: searchHighlight.lng, altitude: 140 },
+              ],
+            })}
+            <Marker3D
+              key="atlas-search-highlight-pin"
+              position={{ lat: searchHighlight.lat, lng: searchHighlight.lng, altitude: 140 }}
+              altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
+              drawsWhenOccluded
+              sizePreserved
+              collisionBehavior={CollisionBehavior.REQUIRED}
+              zIndex={1000}
+            >
+              <img
+                src={staticIcons.searchPin}
+                width={24}
+                height={24}
+                alt=""
+                draggable={false}
+                style={{ pointerEvents: 'none' }}
+              />
+            </Marker3D>
+          </React.Fragment>
+        )}
 
         {NUCLEAR_FACILITIES.map((nf) => (
           <Marker3D

@@ -2151,6 +2151,401 @@ button.atlas-logo-header-btn:focus-visible {
   margin: 3px 6px;
 }
 
+/* ── Header place search (Google Earth–style) ── */
+.hud-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.hud-search-trigger {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.hud-search-field {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 6px 0 10px;
+  border-radius: 8px;
+  background: rgba(8, 12, 24, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.25),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.hud-search-field:focus-within {
+  border-color: rgba(0, 207, 255, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(0, 207, 255, 0.15),
+    0 8px 24px rgba(0, 0, 0, 0.32);
+}
+
+.hud-search-field__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.5);
+  margin-right: 7px;
+  flex-shrink: 0;
+}
+
+.hud-search-field:focus-within .hud-search-field__icon {
+  color: rgba(0, 207, 255, 0.95);
+}
+
+.hud-search-field__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.95);
+  font-family: var(--font-hud);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.hud-search-field__input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 9.5px;
+}
+
+.hud-search-field__clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.hud-search-field__clear:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.hud-search-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: min(300px, calc(100vw - 24px));
+  background: rgba(6, 10, 20, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
+  z-index: 60;
+  max-height: min(60vh, 320px);
+  overflow-y: auto;
+}
+
+.hud-search-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s ease, color 0.1s ease;
+}
+
+.hud-search-item.is-highlighted,
+.hud-search-item:hover {
+  background: rgba(0, 207, 255, 0.1);
+  color: rgba(255, 255, 255, 0.98);
+}
+
+.hud-search-item__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: rgba(0, 207, 255, 0.9);
+  flex-shrink: 0;
+}
+
+.hud-search-item__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.hud-search-item__main {
+  font-family: var(--font-hud);
+  font-size: 11px;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-search-item__secondary {
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-search-status {
+  padding: 9px 12px;
+  font-family: var(--font-hud);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.hud-search-status--error {
+  color: rgba(255, 140, 120, 0.9);
+}
+
+@media (max-width: 640px) {
+  .hud-search-field {
+    height: 36px;
+  }
+
+  .hud-search-field__input {
+    font-size: 13px;
+  }
+
+  .hud-search-dropdown {
+    width: min(320px, calc(100vw - 20px));
+  }
+}
+
+/* ── Google-Earth-style place info card ── */
+.search-result-card {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  z-index: 45;
+  width: min(320px, calc(100vw - 24px));
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+  background: rgba(10, 14, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(22px) saturate(1.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 207, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  pointer-events: auto;
+}
+
+.search-result-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 12px 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.search-result-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.search-result-card__pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(0, 207, 255, 0.14);
+  color: #00cfff;
+  flex-shrink: 0;
+}
+
+.search-result-card__title {
+  margin: 0;
+  font-family: var(--font-hud);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.96);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.search-result-card__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.search-result-card__close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.search-result-card__photo {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.search-result-card__photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.search-result-card__photo-credit {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  max-width: calc(100% - 16px);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-card__photo-credit a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.search-result-card__photo-credit a:hover {
+  text-decoration: underline;
+}
+
+.search-result-card__body {
+  padding: 12px 14px 14px 14px;
+  overflow-y: auto;
+}
+
+.search-result-card__desc {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.search-result-card__desc--address {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+}
+
+.search-result-card__meta {
+  margin: 8px 0 0 0;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+@media (max-width: 640px) {
+  .search-result-card {
+    top: auto;
+    bottom: 60px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 55vh;
+  }
+}
+
+/* ── Leaflet (2D fallback) ATLAS reticle place-mark ── */
+.flatmap-search-pin-icon {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  background: transparent !important;
+  border: none !important;
+  pointer-events: none;
+}
+
+/* Centered rings + dot, all anchored on the image center (14,14) so
+   the mark pins exactly to its lat/lng at every zoom level. */
+.flatmap-search-pin-icon__ring,
+.flatmap-search-pin-icon__ring--inner,
+.flatmap-search-pin-icon__dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.flatmap-search-pin-icon__ring {
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 0 0 4px rgba(0, 207, 255, 0.1),
+    0 0 10px rgba(0, 207, 255, 0.35);
+}
+
+.flatmap-search-pin-icon__ring--inner {
+  width: 11px;
+  height: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: none;
+}
+
+.flatmap-search-pin-icon__dot {
+  width: 5px;
+  height: 5px;
+  background: #00cfff;
+  border: 0.7px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 6px rgba(0, 207, 255, 0.75);
+}
+
 /* Filters sidebar */
 .hud-filters-sidebar {
   position: fixed;

@@ -6,7 +6,7 @@
  * circle markers for GDELT + NASA EONET / FIRMS (same rules as Map3D).
  */
 import { useEffect, useRef, useMemo, useCallback } from 'react'
-import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, CircleMarker, Marker, Polygon, Tooltip, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet.heat'
@@ -27,6 +27,14 @@ const DEFAULT_CENTER = [_home.lat, _home.lng]
 const DEFAULT_ZOOM = 2.5
 const MIN_ZOOM = 2
 const MAX_ZOOM = 12
+
+/** Match GoogleGlobe `TIME_FILTER_MAX_AGE_MS` for HUD time tiers. */
+const TIME_FILTER_MAX_AGE_MS = {
+  live: 2 * 3600_000,
+  '24h': 24 * 3600_000,
+  '7d': 7 * 24 * 3600_000,
+  '30d': 30 * 24 * 3600_000,
+}
 
 /** Sync zoom level back to store */
 function ZoomSync() {
@@ -149,11 +157,133 @@ function ResetViewHandler() {
         setOnResetView(() => {
             const center = getTimezoneViewCenter()
             map.flyTo([center.lat, center.lng], DEFAULT_ZOOM, { duration: 1.2 })
+            useAtlasStore.getState().clearSearchHighlight()
         })
         return () => setOnResetView(null)
     }, [map, setOnResetView])
 
     return null
+}
+
+/**
+ * Bridge the header place-search fly-to bus to Leaflet's viewport so the
+ * 2D fallback matches the 3D globe behaviour. When the Places API returns
+ * a viewport bbox we frame it with `fitBounds`; otherwise we pan to the
+ * point at a sensible city-level zoom.
+ */
+function SearchFlyToHandler() {
+    const map = useMap()
+    const setOnFlyToLocation = useAtlasStore((s) => s.setOnFlyToLocation)
+
+    useEffect(() => {
+        setOnFlyToLocation((target) => {
+            if (!target) return
+            const { lat, lng, viewport } = target
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+            if (viewport) {
+                map.flyToBounds(
+                    [
+                        [viewport.south, viewport.west],
+                        [viewport.north, viewport.east],
+                    ],
+                    { duration: 1.2, padding: [60, 60], maxZoom: 10 },
+                )
+            } else {
+                map.flyTo([lat, lng], 9, { duration: 1.2 })
+            }
+        })
+        return () => setOnFlyToLocation(null)
+    }, [map, setOnFlyToLocation])
+
+    return null
+}
+
+/**
+ * ATLAS reticle `divIcon`: concentric white rings around a cyan dot,
+ * matching the 3D globe sprite. Symmetric around the center so the
+ * icon anchor is `[size/2, size/2]` — the mark pins exactly at the
+ * lat/lng with no tip offset, so scrolling/zooming can't make it
+ * visually drift off the address.
+ */
+const _searchPinIconCache = { icon: null }
+function getSearchPinIcon() {
+    if (_searchPinIconCache.icon) return _searchPinIconCache.icon
+    _searchPinIconCache.icon = L.divIcon({
+        className: 'flatmap-search-pin-icon',
+        html:
+            '<span class="flatmap-search-pin-icon__ring"></span>' +
+            '<span class="flatmap-search-pin-icon__ring flatmap-search-pin-icon__ring--inner"></span>' +
+            '<span class="flatmap-search-pin-icon__dot"></span>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -14],
+    })
+    return _searchPinIconCache.icon
+}
+
+/**
+ * Convert the stored boundary GeoJSON into an array of leaflet-ready
+ * ring coordinates. Supports Polygon + MultiPolygon; returns `[]` if
+ * the payload is malformed so the caller can fall back to the bbox.
+ */
+function boundaryToLeafletPositions(boundary) {
+    if (!boundary || !Array.isArray(boundary.coordinates)) return []
+    const out = []
+    if (boundary.type === 'Polygon') {
+        for (const ring of boundary.coordinates) {
+            const pts = (ring || [])
+                .filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+                .map(([lng, lat]) => [lat, lng])
+            if (pts.length >= 3) out.push(pts)
+        }
+    } else if (boundary.type === 'MultiPolygon') {
+        for (const poly of boundary.coordinates) {
+            for (const ring of poly || []) {
+                const pts = (ring || [])
+                    .filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+                    .map(([lng, lat]) => [lat, lng])
+                if (pts.length >= 3) out.push(pts)
+            }
+        }
+    }
+    return out
+}
+
+function SearchHighlightLayer({ highlight }) {
+    const polygons = useMemo(
+        () => boundaryToLeafletPositions(highlight.boundary),
+        [highlight.boundary],
+    )
+    const pinIcon = useMemo(() => getSearchPinIcon(), [])
+
+    // Official admin boundary only — landmarks/businesses render just
+    // the reticle, never a bbox rectangle. Styled with the ATLAS cyan
+    // accent so the boundary and place-mark read as one system.
+    const pathStyle = {
+        color: 'rgba(0, 207, 255, 0.9)',
+        weight: 1.5,
+        fillColor: 'rgba(0, 207, 255, 0.9)',
+        fillOpacity: 0.05,
+    }
+
+    return (
+        <>
+            {polygons.map((ring, i) => (
+                <Polygon
+                    key={`search-boundary-${i}`}
+                    positions={ring}
+                    pathOptions={pathStyle}
+                    interactive={false}
+                />
+            ))}
+            <Marker
+                position={[highlight.lat, highlight.lng]}
+                icon={pinIcon}
+                interactive={false}
+                keyboard={false}
+            />
+        </>
+    )
 }
 
 function eventRadius(evt) {
@@ -166,8 +296,10 @@ export default function FlatMap({ onGlobeReady }) {
     const dataLayers = useAtlasStore((s) => s.dataLayers)
     const activeDimensions = useAtlasStore((s) => s.activeDimensions)
     const priorityFilter = useAtlasStore((s) => s.priorityFilter)
+    const timeFilter = useAtlasStore((s) => s.timeFilter)
     const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
     const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
+    const searchHighlight = useAtlasStore((s) => s.searchHighlight)
     const onGlobeReadyRef = useRef(onGlobeReady)
     onGlobeReadyRef.current = onGlobeReady
 
@@ -177,6 +309,8 @@ export default function FlatMap({ onGlobeReady }) {
 
     const visibleItems = useMemo(() => {
         const list = []
+        const maxAgeMs = TIME_FILTER_MAX_AGE_MS[timeFilter] ?? TIME_FILTER_MAX_AGE_MS.live
+        const now = Date.now()
         for (const evt of events) {
             if (evt.lat == null || evt.lng == null) continue
             const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
@@ -184,10 +318,17 @@ export default function FlatMap({ onGlobeReady }) {
             if (!activeDimensions.has(evt.dimension)) continue
             if (priorityFilter === 'p1' && evt.priority !== 'p1') continue
             if (priorityFilter === 'p1p2' && evt.priority === 'p3') continue
+            const tsMs = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
+            const fMs = evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN
+            const refMs = Math.max(
+                Number.isFinite(tsMs) ? tsMs : -Infinity,
+                Number.isFinite(fMs) ? fMs : -Infinity,
+            )
+            if (Number.isFinite(refMs) && refMs > -Infinity && now - refMs > maxAgeMs) continue
             list.push(evt)
         }
         return list
-    }, [events, dataLayers, activeDimensions, priorityFilter])
+    }, [events, dataLayers, activeDimensions, priorityFilter, timeFilter])
 
     const handleEventClick = useCallback(
         (evt) => {
@@ -237,6 +378,11 @@ export default function FlatMap({ onGlobeReady }) {
                 />
                 <ZoomSync />
                 <ResetViewHandler />
+                <SearchFlyToHandler />
+
+                {searchHighlight && Number.isFinite(searchHighlight.lat) && Number.isFinite(searchHighlight.lng) && (
+                    <SearchHighlightLayer highlight={searchHighlight} />
+                )}
 
                 {choroOn && choroplethRows.length > 0 && (
                     <GdeltChoroplethLayer rows={choroplethRows} toneRange={toneRange} />

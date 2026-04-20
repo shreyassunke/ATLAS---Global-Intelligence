@@ -159,20 +159,18 @@ function loadActiveDimensions() {
 
 function loadFilters() {
   const params = new URLSearchParams(window.location.search)
-  // One-time migration: older builds defaulted to 'p1' ("Breaking only") which
-  // hid every GDELT event (they emit at p2/p3), making the globe appear empty
-  // on first load. Bump stale defaults to 'all' so returning users see data.
-  try {
-    if (!localStorage.getItem('atlas_priority_default_v2')) {
-      const stored = localStorage.getItem('atlas_priority_filter')
-      if (!stored || stored === 'p1') {
-        localStorage.setItem('atlas_priority_filter', 'all')
-      }
-      localStorage.setItem('atlas_priority_default_v2', '1')
-    }
-  } catch { /* ignore */ }
+  // Legacy `p1` default hid GDELT (p2/p3). Without a URL override, always
+  // treat stored `p1` as `all` and persist so Supabase round-trips don't revive it.
+  const urlPri = params.get('pri')
+  let priority = urlPri || localStorage.getItem('atlas_priority_filter') || 'all'
+  if (!urlPri && priority === 'p1') {
+    priority = 'all'
+    try {
+      localStorage.setItem('atlas_priority_filter', 'all')
+    } catch { /* ignore */ }
+  }
   return {
-    priority: params.get('pri') || localStorage.getItem('atlas_priority_filter') || 'all',
+    priority,
     time: params.get('time') || localStorage.getItem('atlas_time_filter') || 'live'
   }
 }
@@ -331,6 +329,30 @@ export const useAtlasStore = create((set, get) => ({
     const fn = get().onResetView
     if (fn) fn()
   },
+
+  /**
+   * Header place-search result. Rendered by the active globe as a
+   * highlight ring around the viewport bbox (when provided) or around
+   * a short auto-sized radius otherwise. `null` = nothing highlighted.
+   * Shape: { lat, lng, label, viewport?: { north,east,south,west }, createdAt }
+   */
+  searchHighlight: null,
+  setSearchHighlight: (highlight) => set({ searchHighlight: highlight }),
+  clearSearchHighlight: () => set({ searchHighlight: null }),
+
+  /**
+   * Each globe renderer registers a fly-to handler on mount so the
+   * header search bar can focus the camera on a selected place
+   * without importing globe internals. Mirrors the `onResetView`
+   * bridge pattern.
+   */
+  onFlyToLocation: null,
+  setOnFlyToLocation: (fn) => set({ onFlyToLocation: fn }),
+  flyToLocation: (target) => {
+    const fn = get().onFlyToLocation
+    if (fn && target) fn(target)
+  },
+
   openStreetView: ({ lat, lng, source = 'globe', meta = null }) =>
     set(() => ({
       streetViewLocation: { lat, lng, source, meta },

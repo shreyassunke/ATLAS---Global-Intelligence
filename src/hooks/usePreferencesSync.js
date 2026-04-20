@@ -47,7 +47,10 @@ export function usePreferencesSync() {
       if (typeof data.colorblind_mode === 'boolean' && data.colorblind_mode !== store.colorblindMode) {
         store.toggleColorblindMode()
       }
-      if (data.priority_filter) store.setPriorityFilter(data.priority_filter)
+      // Ignore remote `p1` — legacy default; would hide all GDELT dots on login
+      if (data.priority_filter && data.priority_filter !== 'p1') {
+        store.setPriorityFilter(data.priority_filter)
+      }
       if (Array.isArray(data.active_dimensions)) {
         const currentDimensions = store.activeDimensions
         const remoteDimensions = new Set(data.active_dimensions)
