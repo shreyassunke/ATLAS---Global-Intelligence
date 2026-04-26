@@ -2,11 +2,12 @@
  * FlatMap — 2D Leaflet map fallback for Atlas.
  *
  * Minimal GPU usage, perfect for mobile or very low-end devices.
- * Uses CartoDB dark tiles to match the Atlas aesthetic, with
- * circle markers for GDELT + NASA EONET / FIRMS (same rules as Map3D).
+ * Carto dark raster tiles are the basemap; admin polygons sit in a pane that uses CSS
+ * mix-blend-mode so fills tint the tiles (not an opaque overlay). Markers / heat / choropleth
+ * stay above (same rules as Map3D).
  */
 import { useEffect, useRef, useMemo, useCallback } from 'react'
-import { MapContainer, TileLayer, CircleMarker, Marker, Polygon, Tooltip, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, CircleMarker, Marker, Polygon, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet.heat'
@@ -17,8 +18,24 @@ import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
 import { DIMENSION_COLORS } from '../../core/eventSchema'
 import { eventSourceToGlobeDataLayerKey } from '../../core/globeLayers'
 import { PLACE_SEARCH_PIN_SRC } from '../../constants/placeSearchPin'
+import {
+    ColorStabilityCache,
+    buildPrecoloredFeatureCollection,
+    DEFAULT_COLORING_STRATEGY,
+    DEFAULT_LAYER_RULES,
+    fetchGeoJsonCached,
+    filterFeaturesInBounds,
+    geoUrlForLayer,
+    getGraphCacheKey,
+    leafletBoundsToBbox,
+    quantizeZoom,
+    selectLayerKind,
+    stableRegionId,
+} from '../../map/mapColoring'
 
-// Dark tile layer matching Atlas design
+/** Session-scoped color reuse across pan/zoom (Leaflet 2D only). */
+const adminColorStabilityCache = new ColorStabilityCache()
+
 const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
 const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
 
@@ -51,6 +68,165 @@ function ZoomSync() {
         map.on('zoomend', handler)
         return () => map.off('zoomend', handler)
     }, [map, setZoomLevel])
+
+    return null
+}
+
+/**
+ * Above tilePane (200), below overlayPane (400): colors composite into Carto tiles via CSS
+ * (.flatmap-land-tint { mix-blend-mode } in index.css).
+ */
+const MAP_LAND_TINT_PANE = 'flatmapLandTint'
+/** Wider prefetch than strict viewport so small pans do not rebuild / flash. */
+const LAND_VIEW_BBOX_PAD = 0.28
+
+function adminVectorStyle(feat) {
+    const p = feat.properties || {}
+    return {
+        fillColor: p._mapColorFill || 'hsl(200, 42%, 48%)',
+        fillOpacity: p._mapColorFillOpacity ?? 0.55,
+        color: p._mapColorStroke || 'rgba(0, 0, 0, 0.22)',
+        weight: 0.35,
+        lineCap: 'round',
+        lineJoin: 'round',
+    }
+}
+
+/**
+ * Admin polygons tinted into the raster basemap (blend pane), not an opaque overlay.
+ * Skips work when the graph cache key is unchanged; coalesces updates with rAF.
+ */
+function MapLandBasemapLayer() {
+    const map = useMap()
+    const layerRef = useRef(null)
+    const rafRef = useRef(0)
+    const requestIdRef = useRef(0)
+    const rebuildRef = useRef(async () => {})
+    const lastAppliedCacheKeyRef = useRef(null)
+
+    useEffect(() => {
+        let pane = map.getPane(MAP_LAND_TINT_PANE)
+        if (!pane) {
+            pane = map.createPane(MAP_LAND_TINT_PANE)
+            pane.style.zIndex = '250'
+            pane.style.pointerEvents = 'none'
+            pane.classList.add('flatmap-land-tint')
+        }
+    }, [map])
+
+    const scheduleRebuild = useCallback(() => {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = requestAnimationFrame(() => {
+            rafRef.current = 0
+            rebuildRef.current()
+        })
+    }, [])
+
+    const rebuild = useCallback(async () => {
+        const req = ++requestIdRef.current
+        const z = map.getZoom()
+        const layerKind = selectLayerKind(z, DEFAULT_LAYER_RULES, map.getBounds())
+        adminColorStabilityCache.resetIfLayerChanged(layerKind)
+
+        const viewBbox = leafletBoundsToBbox(map.getBounds(), LAND_VIEW_BBOX_PAD)
+        let geojson
+        try {
+            geojson = await fetchGeoJsonCached(geoUrlForLayer(layerKind))
+        } catch {
+            if (req !== requestIdRef.current) return
+            lastAppliedCacheKeyRef.current = null
+            if (layerRef.current) layerRef.current.clearLayers()
+            return
+        }
+        if (req !== requestIdRef.current) return
+
+        const features = filterFeaturesInBounds(geojson.features || [], viewBbox)
+        if (features.length === 0) {
+            lastAppliedCacheKeyRef.current = null
+            if (layerRef.current) layerRef.current.clearLayers()
+            return
+        }
+
+        const sortedIds = [...new Set(features.map((f) => stableRegionId(f, layerKind)))].sort((a, b) =>
+            String(a).localeCompare(String(b)),
+        )
+        const cacheKey = getGraphCacheKey(layerKind, quantizeZoom(z), sortedIds)
+        if (
+            cacheKey === lastAppliedCacheKeyRef.current &&
+            layerRef.current &&
+            layerRef.current.getLayers().length > 0
+        ) {
+            return
+        }
+
+        const prev = adminColorStabilityCache.getPreviousMap()
+        let collection
+        try {
+            const result = buildPrecoloredFeatureCollection({
+                layerKind,
+                features,
+                strategy: DEFAULT_COLORING_STRATEGY,
+                previousColors: prev,
+                useCache: true,
+                cacheKey,
+                useExactWhenSmall: true,
+            })
+            collection = result.collection
+            adminColorStabilityCache.merge(result.colorIndexById)
+        } catch (e) {
+            console.error('[MapLandTintLayer] precolored pipeline failed', e)
+            if (req !== requestIdRef.current) return
+            lastAppliedCacheKeyRef.current = null
+            if (layerRef.current) layerRef.current.clearLayers()
+            return
+        }
+        if (req !== requestIdRef.current) return
+
+        requestAnimationFrame(() => {
+            if (req !== requestIdRef.current) return
+            if (!layerRef.current) {
+                layerRef.current = L.geoJSON(
+                    { type: 'FeatureCollection', features: [] },
+                    {
+                        pane: MAP_LAND_TINT_PANE,
+                        interactive: false,
+                        style: adminVectorStyle,
+                        smoothFactor: 1.25,
+                    },
+                ).addTo(map)
+            }
+            layerRef.current.clearLayers()
+            layerRef.current.addData(collection)
+            lastAppliedCacheKeyRef.current = cacheKey
+        })
+    }, [map])
+
+    rebuildRef.current = rebuild
+
+    useEffect(() => {
+        scheduleRebuild()
+        return () => cancelAnimationFrame(rafRef.current)
+    }, [map, scheduleRebuild])
+
+    const mapEvents = useMemo(
+        () => ({
+            moveend: scheduleRebuild,
+            zoomend: scheduleRebuild,
+        }),
+        [scheduleRebuild],
+    )
+    useMapEvents(mapEvents)
+
+    useEffect(() => {
+        return () => {
+            cancelAnimationFrame(rafRef.current)
+            if (layerRef.current) {
+                map.removeLayer(layerRef.current)
+                layerRef.current = null
+            }
+            lastAppliedCacheKeyRef.current = null
+        }
+    }, [map])
 
     return null
 }
@@ -360,15 +536,12 @@ export default function FlatMap({ onGlobeReady }) {
                 maxZoom={MAX_ZOOM}
                 zoomControl={false}
                 attributionControl={false}
+                preferCanvas
                 style={{ width: '100%', height: '100%', background: '#0a0e1a' }}
                 worldCopyJump={true}
             >
-                <TileLayer
-                    url={TILE_URL}
-                    attribution={TILE_ATTR}
-                    subdimensions="abcd"
-                    maxZoom={MAX_ZOOM}
-                />
+                <TileLayer url={TILE_URL} attribution={TILE_ATTR} subdomains="abcd" maxZoom={MAX_ZOOM} />
+                <MapLandBasemapLayer />
                 <ZoomSync />
                 <ResetViewHandler />
                 <SearchFlyToHandler />

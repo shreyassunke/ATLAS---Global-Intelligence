@@ -10,6 +10,7 @@ import {
   Map3D,
   MapMode,
   Marker3D,
+  Popover,
 } from '@vis.gl/react-google-maps'
 import { getCategoryColor } from '../../utils/categoryColors'
 import { LANDING_GLOBE_MARKERS } from './landingGlobeMarkers'
@@ -283,31 +284,39 @@ function InnerLandingMap() {
             />
           </Marker3D>
         ))}
-      </Map3D>
 
-      {selected ? (
-        <div className="landing-globe-demo__card-wrap landing-globe-demo__card-wrap--immersive pointer-events-auto">
-          <article
-            className="landing-globe-demo__card font-[family-name:var(--font-ui)]"
-            style={{ borderColor: `${getCategoryColor(selected.category)}55` }}
+        {selected ? (
+          <Popover
+            key={selected.id}
+            open
+            position={{ lat: selected.lat, lng: selected.lng, altitude: MARKER_ALT_M }}
+            altitudeMode={AltitudeMode.RELATIVE_TO_GROUND}
+            autoPanDisabled
+            onClose={clearSelection}
+            className="landing-google-globe__popover"
           >
-            <button type="button" className="landing-globe-demo__card-close" onClick={clearSelection} aria-label="Close">
-              ×
-            </button>
-            <p
-              className="landing-globe-demo__card-kicker font-[family-name:var(--font-data)]"
-              style={{ color: getCategoryColor(selected.category) }}
+            <article
+              className="landing-globe-demo__card font-[family-name:var(--font-ui)]"
+              style={{ borderColor: `${getCategoryColor(selected.category)}55` }}
             >
-              {selected.kind === 'use_case' ? 'Use case' : 'Feature'}
-            </p>
-            <h3 className="landing-globe-demo__card-title">{selected.title}</h3>
-            <p className="landing-globe-demo__card-body">{selected.body}</p>
-            {selected.kind === 'use_case' && selected.stat ? (
-              <p className="landing-globe-demo__card-stat font-[family-name:var(--font-data)]">{selected.stat}</p>
-            ) : null}
-          </article>
-        </div>
-      ) : null}
+              <button type="button" className="landing-globe-demo__card-close" onClick={clearSelection} aria-label="Close">
+                ×
+              </button>
+              <p
+                className="landing-globe-demo__card-kicker font-[family-name:var(--font-data)]"
+                style={{ color: getCategoryColor(selected.category) }}
+              >
+                {selected.kind === 'use_case' ? 'Use case' : 'Feature'}
+              </p>
+              <h3 className="landing-globe-demo__card-title">{selected.title}</h3>
+              <p className="landing-globe-demo__card-body">{selected.body}</p>
+              {selected.kind === 'use_case' && selected.stat ? (
+                <p className="landing-globe-demo__card-stat font-[family-name:var(--font-data)]">{selected.stat}</p>
+              ) : null}
+            </article>
+          </Popover>
+        ) : null}
+      </Map3D>
     </div>
   )
 }

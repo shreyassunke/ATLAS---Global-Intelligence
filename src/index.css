@@ -1358,6 +1358,11 @@ button.atlas-logo-header-btn:focus-visible {
   font-family: "JetBrains Mono", monospace;
 }
 
+/* Admin tint pane: normal alpha compositing over tiles (no mix-blend — avoids tile-seam glitches). */
+.flatmap-container .leaflet-pane.flatmap-land-tint {
+  /* blend removed intentionally; see FlatMap MapLandBasemapLayer */
+}
+
 .flatmap-container .leaflet-control-attribution {
   background: rgba(8, 12, 24, 0.7) !important;
   color: rgba(255, 255, 255, 0.3) !important;
@@ -3682,6 +3687,63 @@ button.atlas-logo-header-btn:focus-visible {
   margin-inline: auto;
 }
 
+/* Hero copy over photorealistic globe: soft radial scrim + type shadows (layout unchanged) */
+.stitch-hero--fold .stitch-hero__copy {
+  position: relative;
+  isolation: isolate;
+}
+
+.stitch-hero--fold .stitch-hero__copy::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  translate: -50% 0;
+  width: min(100vw - 1.5rem, 52rem);
+  top: -1rem;
+  bottom: -3.25rem;
+  border-radius: 2rem;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 82% 78% at 50% 36%,
+    rgba(2, 6, 14, 0.58) 0%,
+    rgba(2, 6, 14, 0.32) 48%,
+    rgba(2, 6, 14, 0.08) 72%,
+    rgba(2, 6, 14, 0) 100%
+  );
+}
+
+.stitch-hero--fold .stitch-eyebrow {
+  color: rgba(191, 219, 254, 0.95);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.88),
+    0 0 20px rgba(0, 0, 0, 0.55);
+}
+
+.stitch-hero--fold .stitch-hero-title {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 2px 14px rgba(0, 0, 0, 0.72),
+    0 4px 36px rgba(0, 0, 0, 0.55),
+    0 0 80px rgba(59, 130, 246, 0.12);
+}
+
+.stitch-hero--fold .stitch-hero-body {
+  color: rgba(226, 232, 240, 0.93);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.82),
+    0 2px 18px rgba(0, 0, 0, 0.48);
+}
+
+.stitch-hero--fold .stitch-hero-see-link {
+  color: rgba(203, 213, 225, 0.95);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.78);
+}
+
+.stitch-hero--fold .stitch-hero-see-link:hover {
+  color: #f8fafc;
+}
+
 /* Hero first fold — spacer pushes copy to bottom, globe owns the top */
 .stitch-hero--fold {
   min-height: min(86dvh, 900px);
@@ -3950,6 +4012,54 @@ button.atlas-logo-header-btn:focus-visible {
   margin-bottom: 3.5rem;
 }
 
+/* "The Problem" header over globe — same treatment as hero fold (layout unchanged) */
+.atlas-why .atlas-why__header {
+  position: relative;
+  isolation: isolate;
+}
+
+.atlas-why .atlas-why__header::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  translate: -50% 0;
+  width: min(100vw - 1.5rem, 44rem);
+  top: -0.75rem;
+  bottom: -1.25rem;
+  border-radius: 2rem;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 82% 78% at 50% 42%,
+    rgba(2, 6, 14, 0.58) 0%,
+    rgba(2, 6, 14, 0.32) 48%,
+    rgba(2, 6, 14, 0.08) 72%,
+    rgba(2, 6, 14, 0) 100%
+  );
+}
+
+.atlas-why .atlas-why__header .stitch-eyebrow {
+  color: rgba(191, 219, 254, 0.95);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.88),
+    0 0 20px rgba(0, 0, 0, 0.55);
+}
+
+.atlas-why .atlas-why__header .atlas-section-title {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 2px 14px rgba(0, 0, 0, 0.72),
+    0 4px 36px rgba(0, 0, 0, 0.55),
+    0 0 80px rgba(59, 130, 246, 0.12);
+}
+
+.atlas-why .atlas-why__header .atlas-section-body {
+  color: rgba(226, 232, 240, 0.93);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.82),
+    0 2px 18px rgba(0, 0, 0, 0.48);
+}
+
 .atlas-why__grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -4034,6 +4144,47 @@ button.atlas-logo-header-btn:focus-visible {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
+/* "What You Get" header over globe — same readability treatment (layout unchanged) */
+.atlas-features .atlas-why__header {
+  position: relative;
+  isolation: isolate;
+}
+
+.atlas-features .atlas-why__header::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  translate: -50% 0;
+  width: min(100vw - 1.5rem, 44rem);
+  top: -0.75rem;
+  bottom: -1rem;
+  border-radius: 2rem;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 82% 78% at 50% 42%,
+    rgba(2, 6, 14, 0.58) 0%,
+    rgba(2, 6, 14, 0.32) 48%,
+    rgba(2, 6, 14, 0.08) 72%,
+    rgba(2, 6, 14, 0) 100%
+  );
+}
+
+.atlas-features .atlas-why__header .stitch-eyebrow {
+  color: rgba(191, 219, 254, 0.95);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.88),
+    0 0 20px rgba(0, 0, 0, 0.55);
+}
+
+.atlas-features .atlas-why__header .atlas-section-title {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 2px 14px rgba(0, 0, 0, 0.72),
+    0 4px 36px rgba(0, 0, 0, 0.55),
+    0 0 80px rgba(59, 130, 246, 0.12);
+}
+
 .atlas-features__grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -4102,11 +4253,74 @@ button.atlas-logo-header-btn:focus-visible {
   margin-inline: auto;
 }
 
+/* Final CTA block over globe — same readability treatment (layout unchanged) */
+.atlas-final-cta .atlas-final-cta__inner {
+  position: relative;
+  isolation: isolate;
+}
+
+.atlas-final-cta .atlas-final-cta__inner::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  translate: -50% 0;
+  width: min(100vw - 1.5rem, 36rem);
+  top: -0.75rem;
+  bottom: -2.75rem;
+  border-radius: 2rem;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 85% 80% at 50% 36%,
+    rgba(2, 6, 14, 0.58) 0%,
+    rgba(2, 6, 14, 0.32) 48%,
+    rgba(2, 6, 14, 0.08) 72%,
+    rgba(2, 6, 14, 0) 100%
+  );
+}
+
+.atlas-final-cta .atlas-final-cta__inner .stitch-eyebrow {
+  color: rgba(191, 219, 254, 0.95);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.88),
+    0 0 20px rgba(0, 0, 0, 0.55);
+}
+
+.atlas-final-cta .atlas-final-cta__inner .atlas-section-title {
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 2px 14px rgba(0, 0, 0, 0.72),
+    0 4px 36px rgba(0, 0, 0, 0.55),
+    0 0 80px rgba(59, 130, 246, 0.12);
+}
+
 /* ── Footer ── */
 .atlas-footer {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   padding-top: clamp(2.5rem, 5vh, 4rem);
   padding-bottom: clamp(2rem, 4vh, 3rem);
+  position: relative;
+  isolation: isolate;
+}
+
+.atlas-footer::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  translate: -50% 0;
+  width: min(100vw - 1.5rem, 58rem);
+  top: -0.25rem;
+  bottom: -0.25rem;
+  border-radius: 2rem;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 92% 75% at 50% 28%,
+    rgba(2, 6, 14, 0.52) 0%,
+    rgba(2, 6, 14, 0.3) 45%,
+    rgba(2, 6, 14, 0.1) 68%,
+    rgba(2, 6, 14, 0) 100%
+  );
 }
 
 .atlas-footer__top {
@@ -4247,6 +4461,47 @@ button.atlas-logo-header-btn:focus-visible {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.2);
+}
+
+.atlas-footer .atlas-wordmark--landing-footer {
+  filter:
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.82))
+    drop-shadow(0 2px 16px rgba(0, 0, 0, 0.48));
+}
+
+.atlas-footer .atlas-footer__tagline-sm {
+  color: rgba(203, 213, 225, 0.9);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.82),
+    0 2px 14px rgba(0, 0, 0, 0.42);
+}
+
+.atlas-footer .atlas-footer__col-label {
+  color: rgba(196, 211, 232, 0.9);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.85),
+    0 0 18px rgba(0, 0, 0, 0.42);
+}
+
+.atlas-footer .atlas-footer__col-body {
+  color: rgba(214, 223, 238, 0.93);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.78),
+    0 2px 14px rgba(0, 0, 0, 0.38);
+}
+
+.atlas-footer .atlas-footer__copy {
+  color: rgba(226, 232, 240, 0.42);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+
+.atlas-footer .stitch-footer-link {
+  color: rgba(203, 213, 225, 0.92);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+}
+
+.atlas-footer .stitch-footer-link:hover {
+  color: #f8fafc;
 }
 
 .stitch-btn-primary {
@@ -4564,6 +4819,11 @@ button.atlas-logo-header-btn:focus-visible {
   transform: translateX(-50%);
   width: min(100% - 1.5rem, 300px);
   z-index: 60;
+}
+
+/* Map3D landing: marker-anchored popover (LandingGoogleGlobe) — width matches former bottom sheet */
+.landing-google-globe__popover {
+  max-width: min(100vw - 1.5rem, 300px);
 }
 
 .landing-globe-immersive-fallback {
