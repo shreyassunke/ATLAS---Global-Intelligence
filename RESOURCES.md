@@ -65,3 +65,6 @@
 - [CesiumJS](https://cesium.com/cesiumjs/) — Terrain, imagery, labels, weather
 - [NASA WorldWind](https://worldwind.arc.nasa.gov) — Open source globe SDK
 - [MapLibre GL JS](https://maplibre.org) — Open source WebGL maps/globe
+
+## Atlas repository docs
+- [Greedy graph coloring presentation (FlatMap US demo)](docs/greedy-coloring-presentation.md) — speaker notes, four-color context, embedded source excerpts

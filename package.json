@@ -10,6 +10,7 @@
     "prebuild:gdelt-lookups": "node scripts/build-gdelt-lookups.mjs",
     "build:continents": "node scripts/build-continent-geojson.mjs",
     "build:admin1": "node scripts/build-admin1-geojson.mjs",
+    "precompute-coloring": "node scripts/precompute-map-coloring.mjs",
     "preview": "vite preview",
     "deploy": "npx vercel --prod",
     "deploy:preview": "npx vercel"
@@ -46,6 +47,7 @@
     "gsap": "^3.14.2",
     "leaflet": "^1.9.4",
     "leaflet.heat": "^0.2.0",
+    "maplibre-gl": "^5.24.0",
     "postprocessing": "^6.38.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

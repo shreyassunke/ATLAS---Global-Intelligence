@@ -1,601 +1,425 @@
 /**
- * FlatMap — 2D Leaflet map fallback for Atlas.
- *
- * Minimal GPU usage, perfect for mobile or very low-end devices.
- * Carto dark raster tiles are the basemap; admin polygons sit in a pane that uses CSS
- * mix-blend-mode so fills tint the tiles (not an opaque overlay). Markers / heat / choropleth
- * stay above (same rules as Map3D).
+ * FlatMap — 2D map via MapLibre GL JS. Countries use offline χ coloring;
+ * US states run a live Welsh–Powell greedy demo when zoomed over CONUS (see `usStatesGreedyColoringPresentation.js`).
  */
-import { useEffect, useRef, useMemo, useCallback } from 'react'
-import { MapContainer, TileLayer, CircleMarker, Marker, Polygon, Tooltip, useMap, useMapEvents } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-import 'leaflet.heat'
+import { useEffect, useRef } from 'react'
+import maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
 import { useAtlasStore } from '../../store/atlasStore'
 import { getTimezoneViewCenter } from '../../utils/geo'
-import useGdeltGeoOverlay from '../../hooks/useGdeltGeoOverlay'
-import { toneToChoroplethRgba } from '../../services/gdelt/geoService'
+import { isMobileDevice } from '../../config/qualityTiers'
 import { DIMENSION_COLORS } from '../../core/eventSchema'
-import { eventSourceToGlobeDataLayerKey } from '../../core/globeLayers'
-import { PLACE_SEARCH_PIN_SRC } from '../../constants/placeSearchPin'
 import {
-    ColorStabilityCache,
-    buildPrecoloredFeatureCollection,
-    DEFAULT_COLORING_STRATEGY,
-    DEFAULT_LAYER_RULES,
-    fetchGeoJsonCached,
-    filterFeaturesInBounds,
-    geoUrlForLayer,
-    getGraphCacheKey,
-    leafletBoundsToBbox,
-    quantizeZoom,
-    selectLayerKind,
-    stableRegionId,
-} from '../../map/mapColoring'
+  applyGreedyStepToCollection,
+  GREEDY_ANIM_STEP_MS,
+  isMapFocusedOnUsa,
+  prepareUsGreedyColoringPresentation,
+} from '../../map/usStatesGreedyColoringPresentation'
 
-/** Session-scoped color reuse across pan/zoom (Leaflet 2D only). */
-const adminColorStabilityCache = new ColorStabilityCache()
+const URL_COUNTRIES =
+  'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_admin_0_countries.geojson'
+const URL_STATES =
+  'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_admin_1_states_provinces_shp.geojson'
 
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
+/** Carto OSM labels only (countries → cities); tint baked for dark basemaps */
+const BASE_LABEL_TILES = [
+  'https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
+  'https://b.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
+  'https://c.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
+  'https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png',
+]
 
-// Compute home center from the user's timezone (matches Cesium & Globe.GL spawn)
-const _home = getTimezoneViewCenter()
-const DEFAULT_CENTER = [_home.lat, _home.lng]
+/** Warm vintage palette: indices 0–2 = muted R, G, B (sRGB); then amber → mustard → teal → plum → rose */
+const ATLAS_COLORS = [
+  '#b8574d',
+  '#6f9178',
+  '#5f7a9e',
+  '#c2783f',
+  '#c9a03d',
+  '#5f918c',
+  '#8a7398',
+  '#b07888',
+]
+
+/** Navy-tinted canvas; aligns with Carto dark_no_labels oceans when tiles load */
+const OCEAN_BG = '#0a1426'
+
 const DEFAULT_ZOOM = 2.5
-const MIN_ZOOM = 2
+const MIN_ZOOM = 1.5
 const MAX_ZOOM = 12
 
-/** Match GoogleGlobe `TIME_FILTER_MAX_AGE_MS` for HUD time tiers. */
-const TIME_FILTER_MAX_AGE_MS = {
-  live: 2 * 3600_000,
-  '24h': 24 * 3600_000,
-  '7d': 7 * 24 * 3600_000,
-  '30d': 30 * 24 * 3600_000,
+function regionKeyForCountry(feat) {
+  const p = feat.properties || {}
+  const a3 = (p.ADM0_A3 || p.adm0_a3 || '').toString()
+  if (!a3 || a3 === 'ATA' || a3 === '-99') return null
+  return a3
 }
 
-/** Sync zoom level back to store */
-function ZoomSync() {
-    const map = useMap()
-    const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
-
-    useEffect(() => {
-        const handler = () => {
-            const z = map.getZoom()
-            const norm = (z - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)
-            setZoomLevel(Math.max(0, Math.min(1, norm)))
-        }
-        map.on('zoomend', handler)
-        return () => map.off('zoomend', handler)
-    }, [map, setZoomLevel])
-
-    return null
+function regionKeyForState(feat) {
+  const p = feat.properties || {}
+  if ((p.iso_a2 || p.ISO_A2 || '').toString().toUpperCase() !== 'US') return null
+  const abbr = (p.postal || p.POSTAL || '').toString().toUpperCase()
+  if (abbr.length === 2) return `US_${abbr}`
+  const iso2 = (p.iso_3166_2 || p.ISO_3166_2 || '').toString().toUpperCase()
+  const m = iso2.match(/^US-([A-Z]{2})$/i)
+  if (m) return `US_${m[1].toUpperCase()}`
+  return null
 }
 
-/**
- * Above tilePane (200), below overlayPane (400): colors composite into Carto tiles via CSS
- * (.flatmap-land-tint { mix-blend-mode } in index.css).
- */
-const MAP_LAND_TINT_PANE = 'flatmapLandTint'
-/** Wider prefetch than strict viewport so small pans do not rebuild / flash. */
-const LAND_VIEW_BBOX_PAD = 0.28
-
-function adminVectorStyle(feat) {
-    const p = feat.properties || {}
-    return {
-        fillColor: p._mapColorFill || 'hsl(200, 42%, 48%)',
-        fillOpacity: p._mapColorFillOpacity ?? 0.55,
-        color: p._mapColorStroke || 'rgba(0, 0, 0, 0.22)',
-        weight: 0.35,
-        lineCap: 'round',
-        lineJoin: 'round',
-    }
-}
-
-/**
- * Admin polygons tinted into the raster basemap (blend pane), not an opaque overlay.
- * Skips work when the graph cache key is unchanged; coalesces updates with rAF.
- */
-function MapLandBasemapLayer() {
-    const map = useMap()
-    const layerRef = useRef(null)
-    const rafRef = useRef(0)
-    const requestIdRef = useRef(0)
-    const rebuildRef = useRef(async () => {})
-    const lastAppliedCacheKeyRef = useRef(null)
-
-    useEffect(() => {
-        let pane = map.getPane(MAP_LAND_TINT_PANE)
-        if (!pane) {
-            pane = map.createPane(MAP_LAND_TINT_PANE)
-            pane.style.zIndex = '250'
-            pane.style.pointerEvents = 'none'
-            pane.classList.add('flatmap-land-tint')
-        }
-    }, [map])
-
-    const scheduleRebuild = useCallback(() => {
-        cancelAnimationFrame(rafRef.current)
-        rafRef.current = requestAnimationFrame(() => {
-            rafRef.current = 0
-            rebuildRef.current()
-        })
-    }, [])
-
-    const rebuild = useCallback(async () => {
-        const req = ++requestIdRef.current
-        const z = map.getZoom()
-        const layerKind = selectLayerKind(z, DEFAULT_LAYER_RULES, map.getBounds())
-        adminColorStabilityCache.resetIfLayerChanged(layerKind)
-
-        const viewBbox = leafletBoundsToBbox(map.getBounds(), LAND_VIEW_BBOX_PAD)
-        let geojson
-        try {
-            geojson = await fetchGeoJsonCached(geoUrlForLayer(layerKind))
-        } catch {
-            if (req !== requestIdRef.current) return
-            lastAppliedCacheKeyRef.current = null
-            if (layerRef.current) layerRef.current.clearLayers()
-            return
-        }
-        if (req !== requestIdRef.current) return
-
-        const features = filterFeaturesInBounds(geojson.features || [], viewBbox)
-        if (features.length === 0) {
-            lastAppliedCacheKeyRef.current = null
-            if (layerRef.current) layerRef.current.clearLayers()
-            return
-        }
-
-        const sortedIds = [...new Set(features.map((f) => stableRegionId(f, layerKind)))].sort((a, b) =>
-            String(a).localeCompare(String(b)),
-        )
-        const cacheKey = getGraphCacheKey(layerKind, quantizeZoom(z), sortedIds)
-        if (
-            cacheKey === lastAppliedCacheKeyRef.current &&
-            layerRef.current &&
-            layerRef.current.getLayers().length > 0
-        ) {
-            return
-        }
-
-        const prev = adminColorStabilityCache.getPreviousMap()
-        let collection
-        try {
-            const result = buildPrecoloredFeatureCollection({
-                layerKind,
-                features,
-                strategy: DEFAULT_COLORING_STRATEGY,
-                previousColors: prev,
-                useCache: true,
-                cacheKey,
-                useExactWhenSmall: true,
-            })
-            collection = result.collection
-            adminColorStabilityCache.merge(result.colorIndexById)
-        } catch (e) {
-            console.error('[MapLandTintLayer] precolored pipeline failed', e)
-            if (req !== requestIdRef.current) return
-            lastAppliedCacheKeyRef.current = null
-            if (layerRef.current) layerRef.current.clearLayers()
-            return
-        }
-        if (req !== requestIdRef.current) return
-
-        requestAnimationFrame(() => {
-            if (req !== requestIdRef.current) return
-            if (!layerRef.current) {
-                layerRef.current = L.geoJSON(
-                    { type: 'FeatureCollection', features: [] },
-                    {
-                        pane: MAP_LAND_TINT_PANE,
-                        interactive: false,
-                        style: adminVectorStyle,
-                        smoothFactor: 1.25,
-                    },
-                ).addTo(map)
-            }
-            layerRef.current.clearLayers()
-            layerRef.current.addData(collection)
-            lastAppliedCacheKeyRef.current = cacheKey
-        })
-    }, [map])
-
-    rebuildRef.current = rebuild
-
-    useEffect(() => {
-        scheduleRebuild()
-        return () => cancelAnimationFrame(rafRef.current)
-    }, [map, scheduleRebuild])
-
-    const mapEvents = useMemo(
-        () => ({
-            moveend: scheduleRebuild,
-            zoomend: scheduleRebuild,
-        }),
-        [scheduleRebuild],
-    )
-    useMapEvents(mapEvents)
-
-    useEffect(() => {
-        return () => {
-            cancelAnimationFrame(rafRef.current)
-            if (layerRef.current) {
-                map.removeLayer(layerRef.current)
-                layerRef.current = null
-            }
-            lastAppliedCacheKeyRef.current = null
-        }
-    }, [map])
-
-    return null
-}
-
-/** GDELT PointHeatmap overlay — density of events in the last `timespan`. */
-function GdeltHeatLayer({ points }) {
-    const map = useMap()
-    const layerRef = useRef(null)
-
-    useEffect(() => {
-        if (!points || points.length === 0) {
-            if (layerRef.current) {
-                map.removeLayer(layerRef.current)
-                layerRef.current = null
-            }
-            return
-        }
-        const maxWeight = points.reduce((m, p) => Math.max(m, p.weight || 1), 1)
-        const latlngs = points.map((p) => [p.lat, p.lng, (p.weight || 1) / maxWeight])
-        if (!layerRef.current) {
-            layerRef.current = L.heatLayer(latlngs, {
-                radius: 22,
-                blur: 18,
-                minOpacity: 0.25,
-                max: 1,
-                gradient: {
-                    0.2: '#1a90ff',
-                    0.4: '#00e6ff',
-                    0.6: '#ffe066',
-                    0.8: '#ff7a3c',
-                    1.0: '#ff2d55',
-                },
-            }).addTo(map)
-        } else {
-            layerRef.current.setLatLngs(latlngs)
-        }
-        return () => {
-            if (layerRef.current) {
-                map.removeLayer(layerRef.current)
-                layerRef.current = null
-            }
-        }
-    }, [map, points])
-
-    return null
-}
-
-/** Country/ADM1 tone choropleth overlay. */
-function GdeltChoroplethLayer({ rows, toneRange }) {
-    const map = useMap()
-    const layerRef = useRef(null)
-
-    useEffect(() => {
-        if (layerRef.current) {
-            map.removeLayer(layerRef.current)
-            layerRef.current = null
-        }
-        if (!rows || rows.length === 0) return undefined
-
-        const features = rows
-            .map((r, i) => ({
-                type: 'Feature',
-                geometry: r.geometry,
-                properties: { __idx: i, name: r.name, tone: r.tone, count: r.count },
-            }))
-
-        const geojson = { type: 'FeatureCollection', features }
-        const min = toneRange?.min ?? -5
-        const max = toneRange?.max ?? 5
-
-        layerRef.current = L.geoJSON(geojson, {
-            style: (feat) => ({
-                fillColor: toneToChoroplethRgba(feat.properties.tone, min, max),
-                fillOpacity: 0.55,
-                color: 'rgba(255,255,255,0.25)',
-                weight: 0.6,
-            }),
-            onEachFeature: (feat, layer) => {
-                const { name, tone, count } = feat.properties
-                layer.bindTooltip(
-                    `<div class="flatmap-tooltip-inner"><span class="flatmap-tooltip-cat">${name || '—'}</span></div>` +
-                    `<div class="flatmap-tooltip-title">Tone ${Number(tone).toFixed(2)} · ${count} mentions</div>`,
-                    { direction: 'top', sticky: true, className: 'flatmap-tooltip' },
-                )
-            },
-        }).addTo(map)
-
-        return () => {
-            if (layerRef.current) {
-                map.removeLayer(layerRef.current)
-                layerRef.current = null
-            }
-        }
-    }, [map, rows, toneRange])
-
-    return null
-}
-
-/** Reset view handler */
-function ResetViewHandler() {
-    const map = useMap()
-    const setOnResetView = useAtlasStore((s) => s.setOnResetView)
-
-    useEffect(() => {
-        setOnResetView(() => {
-            const center = getTimezoneViewCenter()
-            map.flyTo([center.lat, center.lng], DEFAULT_ZOOM, { duration: 1.2 })
-            useAtlasStore.getState().clearSearchHighlight()
-        })
-        return () => setOnResetView(null)
-    }, [map, setOnResetView])
-
-    return null
-}
-
-/**
- * Bridge the header place-search fly-to bus to Leaflet's viewport so the
- * 2D fallback matches the 3D globe behaviour. When the Places API returns
- * a viewport bbox we frame it with `fitBounds`; otherwise we pan to the
- * point at a sensible city-level zoom.
- */
-function SearchFlyToHandler() {
-    const map = useMap()
-    const setOnFlyToLocation = useAtlasStore((s) => s.setOnFlyToLocation)
-
-    useEffect(() => {
-        setOnFlyToLocation((target) => {
-            if (!target) return
-            const { lat, lng, viewport } = target
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
-            if (viewport) {
-                map.flyToBounds(
-                    [
-                        [viewport.south, viewport.west],
-                        [viewport.north, viewport.east],
-                    ],
-                    { duration: 1.2, padding: [60, 60], maxZoom: 10 },
-                )
-            } else {
-                map.flyTo([lat, lng], 9, { duration: 1.2 })
-            }
-        })
-        return () => setOnFlyToLocation(null)
-    }, [map, setOnFlyToLocation])
-
-    return null
-}
-
-/** Same red teardrop as Map3D (`/public/markers/place-search-pin.svg`). */
-const FLATMAP_PIN_W = 40
-const FLATMAP_PIN_H = Math.round((FLATMAP_PIN_W * 56) / 48)
-const _searchPinIconCache = { icon: null }
-function getSearchPinIcon() {
-    if (_searchPinIconCache.icon) return _searchPinIconCache.icon
-    _searchPinIconCache.icon = L.icon({
-        iconUrl: PLACE_SEARCH_PIN_SRC,
-        iconSize: [FLATMAP_PIN_W, FLATMAP_PIN_H],
-        iconAnchor: [FLATMAP_PIN_W / 2, FLATMAP_PIN_H],
-        popupAnchor: [0, -FLATMAP_PIN_H],
+function injectColors(features, colorAssignment, keyFn) {
+  const out = []
+  for (const f of features) {
+    const key = keyFn(f)
+    if (key == null) continue
+    const idx = colorAssignment[key]
+    const c =
+      idx != null && ATLAS_COLORS[idx] != null
+        ? ATLAS_COLORS[idx]
+        : ATLAS_COLORS[0]
+    out.push({
+      ...f,
+      properties: { ...f.properties, atlas_color: c },
     })
-    return _searchPinIconCache.icon
+  }
+  return out
 }
 
-/**
- * Convert the stored boundary GeoJSON into an array of leaflet-ready
- * ring coordinates. Supports Polygon + MultiPolygon; returns `[]` if
- * the payload is malformed so the caller can fall back to the bbox.
- */
-function boundaryToLeafletPositions(boundary) {
-    if (!boundary || !Array.isArray(boundary.coordinates)) return []
-    const out = []
-    if (boundary.type === 'Polygon') {
-        for (const ring of boundary.coordinates) {
-            const pts = (ring || [])
-                .filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
-                .map(([lng, lat]) => [lat, lng])
-            if (pts.length >= 3) out.push(pts)
-        }
-    } else if (boundary.type === 'MultiPolygon') {
-        for (const poly of boundary.coordinates) {
-            for (const ring of poly || []) {
-                const pts = (ring || [])
-                    .filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
-                    .map(([lng, lat]) => [lat, lng])
-                if (pts.length >= 3) out.push(pts)
-            }
-        }
-    }
-    return out
-}
-
-function SearchHighlightLayer({ highlight }) {
-    const polygons = useMemo(
-        () => boundaryToLeafletPositions(highlight.boundary),
-        [highlight.boundary],
-    )
-    const pinIcon = useMemo(() => getSearchPinIcon(), [])
-
-    // Official admin boundary only — landmarks/businesses render just
-    // the reticle, never a bbox rectangle. Styled with the ATLAS cyan
-    // accent so the boundary and place-mark read as one system.
-    const pathStyle = {
-        color: 'rgba(0, 207, 255, 0.9)',
-        weight: 1.5,
-        fillColor: 'rgba(0, 207, 255, 0.9)',
-        fillOpacity: 0.05,
-    }
-
-    return (
-        <>
-            {polygons.map((ring, i) => (
-                <Polygon
-                    key={`search-boundary-${i}`}
-                    positions={ring}
-                    pathOptions={pathStyle}
-                    interactive={false}
-                />
-            ))}
-            <Marker
-                position={[highlight.lat, highlight.lng]}
-                icon={pinIcon}
-                interactive={false}
-                keyboard={false}
-            />
-        </>
-    )
-}
-
-function eventRadius(evt) {
-    const base = evt.severity >= 4 ? 9 : evt.severity >= 3 ? 7 : 5
-    return base
+function buildEventFeatures(events) {
+  return events
+    .filter((e) => e.lat != null && e.lng != null)
+    .map((e) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [e.lng, e.lat] },
+      properties: {
+        color: DIMENSION_COLORS[e.dimension] || '#1a90ff',
+        radius_min: Math.max(3, (e.severity || 1) * 1.5),
+        radius_max: Math.max(6, (e.severity || 1) * 4),
+        opacity: e.opacity ?? 0.8,
+        _isEvent: true,
+        _eventData: JSON.stringify(e),
+      },
+    }))
 }
 
 export default function FlatMap({ onGlobeReady }) {
-    const events = useAtlasStore((s) => s.events)
-    const dataLayers = useAtlasStore((s) => s.dataLayers)
-    const activeDimensions = useAtlasStore((s) => s.activeDimensions)
-    const priorityFilter = useAtlasStore((s) => s.priorityFilter)
-    const timeFilter = useAtlasStore((s) => s.timeFilter)
-    const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
-    const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
-    const searchHighlight = useAtlasStore((s) => s.searchHighlight)
-    const onGlobeReadyRef = useRef(onGlobeReady)
-    onGlobeReadyRef.current = onGlobeReady
+  const containerRef = useRef(null)
+  const mapRef = useRef(null)
+  const onReadyRef = useRef(onGlobeReady)
+  onReadyRef.current = onGlobeReady
 
-    const { heatmapPoints, choroplethRows, toneRange } = useGdeltGeoOverlay()
-    const heatOn = dataLayers?.gdeltHeatmap !== false
-    const choroOn = dataLayers?.gdeltChoropleth === true
+  const events = useAtlasStore((s) => s.events)
+  const setSelectedMarker = useAtlasStore((s) => s.setSelectedMarker)
+  const setSelectedEvent = useAtlasStore((s) => s.setSelectedEvent)
+  const setZoomLevel = useAtlasStore((s) => s.setZoomLevel)
+  const setOnResetView = useAtlasStore((s) => s.setOnResetView)
 
-    const visibleItems = useMemo(() => {
-        const list = []
-        const maxAgeMs = TIME_FILTER_MAX_AGE_MS[timeFilter] ?? TIME_FILTER_MAX_AGE_MS.live
-        const now = Date.now()
-        for (const evt of events) {
-            if (evt.lat == null || evt.lng == null) continue
-            const layerKey = eventSourceToGlobeDataLayerKey(evt.source)
-            if (!layerKey || dataLayers[layerKey] === false) continue
-            if (!activeDimensions.has(evt.dimension)) continue
-            if (priorityFilter === 'p1' && evt.priority !== 'p1') continue
-            if (priorityFilter === 'p1p2' && evt.priority === 'p3') continue
-            const tsMs = evt.timestamp ? new Date(evt.timestamp).getTime() : NaN
-            const fMs = evt.fetchedAt ? new Date(evt.fetchedAt).getTime() : NaN
-            const refMs = Math.max(
-                Number.isFinite(tsMs) ? tsMs : -Infinity,
-                Number.isFinite(fMs) ? fMs : -Infinity,
-            )
-            if (Number.isFinite(refMs) && refMs > -Infinity && now - refMs > maxAgeMs) continue
-            list.push(evt)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return undefined
+
+    let map = null
+    let cancelled = false
+    /** Greedy USA demo timer — cleared on unmount / leaving viewport */
+    let usaGreedyAnimTimer = null
+
+    const home = getTimezoneViewCenter()
+    const center = [home.lng, home.lat]
+    const pr = isMobileDevice() ? 1 : Math.min(typeof window !== 'undefined' ? window.devicePixelRatio : 1, 2)
+
+    ;(async () => {
+      const [resColor, resC, resS] = await Promise.all([
+        fetch('/atlas-map-coloring.json'),
+        fetch(URL_COUNTRIES),
+        fetch(URL_STATES),
+      ])
+      if (cancelled) return
+      if (!resColor.ok) throw new Error(`atlas-map-coloring.json ${resColor.status}`)
+      if (!resC.ok) throw new Error(`countries ${resC.status}`)
+      if (!resS.ok) throw new Error(`states ${resS.status}`)
+
+      const coloring = await resColor.json()
+      const countries = await resC.json()
+      const admin1 = await resS.json()
+      if (cancelled) return
+
+      const assignment = coloring.colorAssignment || {}
+      const countryFeatures = injectColors(countries.features || [], assignment, regionKeyForCountry)
+      const usStates = (admin1.features || [])
+        .map((f) => {
+          if (!regionKeyForState(f)) return null
+          return f
+        })
+        .filter(Boolean)
+      const usaGreedy = prepareUsGreedyColoringPresentation(usStates, ATLAS_COLORS)
+      const usaGreedyBaselineStatesFc = structuredClone(usaGreedy.collection)
+
+      const coloredCountries = { type: 'FeatureCollection', features: countryFeatures }
+      const coloredStates = usaGreedy.collection
+
+      let usaGreedyDone = false
+      let usaGreedyWorkingFc = structuredClone(usaGreedyBaselineStatesFc)
+
+      function onViewportForUsaGreedy(mapInstance) {
+        if (cancelled || !mapInstance) return
+        const focused = isMapFocusedOnUsa(mapInstance)
+        if (!focused) {
+          if (usaGreedyAnimTimer != null) {
+            clearInterval(usaGreedyAnimTimer)
+            usaGreedyAnimTimer = null
+          }
+          usaGreedyDone = false
+          usaGreedyWorkingFc = structuredClone(usaGreedyBaselineStatesFc)
+          const stOff = mapInstance.getSource('states')
+          if (stOff && typeof stOff.setData === 'function') {
+            stOff.setData(usaGreedyWorkingFc)
+          }
+          return
         }
-        return list
-    }, [events, dataLayers, activeDimensions, priorityFilter, timeFilter])
+        if (usaGreedyDone || usaGreedyAnimTimer != null) return
 
-    const handleEventClick = useCallback(
-        (evt) => {
-            const src = (evt.source || '').toLowerCase()
-            if (src.includes('gdelt')) {
-                setSelectedMarker(evt)
-                setSelectedEvent(null)
-            } else {
-                setSelectedEvent(evt)
-                setSelectedMarker(null)
-            }
+        usaGreedyWorkingFc = structuredClone(usaGreedyBaselineStatesFc)
+        const stStart = mapInstance.getSource('states')
+        if (stStart && typeof stStart.setData === 'function') {
+          stStart.setData(usaGreedyWorkingFc)
+        }
+
+        let stepIdx = 0
+        usaGreedyAnimTimer = setInterval(() => {
+          if (cancelled || !mapRef.current) return
+          if (stepIdx >= usaGreedy.steps.length) {
+            clearInterval(usaGreedyAnimTimer)
+            usaGreedyAnimTimer = null
+            usaGreedyDone = true
+            return
+          }
+          const step = usaGreedy.steps[stepIdx++]
+          usaGreedyWorkingFc = applyGreedyStepToCollection(usaGreedyWorkingFc, step.regionId, step.colorHex)
+          const st = mapRef.current.getSource('states')
+          if (st && typeof st.setData === 'function') {
+            st.setData(usaGreedyWorkingFc)
+          }
+        }, GREEDY_ANIM_STEP_MS)
+      }
+
+      if (cancelled) return
+
+      map = new maplibregl.Map({
+        container: el,
+        style: {
+          version: 8,
+          glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+          sources: {},
+          layers: [
+            {
+              id: 'background',
+              type: 'background',
+              paint: { 'background-color': OCEAN_BG },
+            },
+          ],
         },
-        [setSelectedEvent, setSelectedMarker],
-    )
+        center,
+        zoom: DEFAULT_ZOOM,
+        minZoom: MIN_ZOOM,
+        maxZoom: MAX_ZOOM,
+        maxPitch: 0,
+        minPitch: 0,
+        pitch: 0,
+        pixelRatio: pr,
+        attributionControl: false,
+        maplibreLogo: false,
+        dragRotate: false,
+        pitchWithRotate: false,
+      })
+      mapRef.current = map
 
-    // Signal ready after mount
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (onGlobeReadyRef.current) onGlobeReadyRef.current()
-        }, 300)
-        return () => clearTimeout(timer)
-    }, [])
+      map.on('load', () => {
+        if (cancelled) return
+        map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right')
 
-    // Truncate title for tooltip
-    const truncate = useCallback((str, len = 60) => {
-        if (!str) return ''
-        return str.length > len ? str.slice(0, len) + '…' : str
-    }, [])
+        map.addSource('countries', { type: 'geojson', data: coloredCountries })
+        map.addSource('states', { type: 'geojson', data: coloredStates })
+        map.addSource('events', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+        map.addSource('basemap-labels', {
+          type: 'raster',
+          tiles: BASE_LABEL_TILES,
+          tileSize: 256,
+          attribution:
+            '<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a> © CARTO',
+        })
 
-    return (
-        <div className="fixed inset-0 z-0 flatmap-container">
-            <MapContainer
-                center={DEFAULT_CENTER}
-                zoom={DEFAULT_ZOOM}
-                minZoom={MIN_ZOOM}
-                maxZoom={MAX_ZOOM}
-                zoomControl={false}
-                attributionControl={false}
-                preferCanvas
-                style={{ width: '100%', height: '100%', background: '#0a0e1a' }}
-                worldCopyJump={true}
-            >
-                <TileLayer url={TILE_URL} attribution={TILE_ATTR} subdomains="abcd" maxZoom={MAX_ZOOM} />
-                <MapLandBasemapLayer />
-                <ZoomSync />
-                <ResetViewHandler />
-                <SearchFlyToHandler />
+        map.addLayer({
+          id: 'countries-fill',
+          type: 'fill',
+          source: 'countries',
+          paint: {
+            'fill-color': ['get', 'atlas_color'],
+            'fill-opacity': 0.88,
+            'fill-antialias': true,
+          },
+        })
+        map.addLayer({
+          id: 'countries-line-back',
+          type: 'line',
+          source: 'countries',
+          paint: {
+            'line-color': '#040814',
+            'line-opacity': 0.92,
+            'line-blur': 0.25,
+            'line-width': ['interpolate', ['linear'], ['zoom'], 1, 2.4, 4, 4.5, 10, 7],
+          },
+        })
+        map.addLayer({
+          id: 'countries-line',
+          type: 'line',
+          source: 'countries',
+          paint: {
+            'line-color': 'rgba(236, 242, 255, 0.78)',
+            'line-opacity': 1,
+            'line-blur': 0,
+            'line-width': ['interpolate', ['linear'], ['zoom'], 1, 0.85, 4, 1.35, 10, 2.35],
+          },
+        })
+        map.addLayer({
+          id: 'states-fill',
+          type: 'fill',
+          source: 'states',
+          minzoom: 3,
+          paint: {
+            'fill-color': ['get', 'atlas_color'],
+            'fill-opacity': 0.88,
+            'fill-antialias': true,
+          },
+        })
+        map.addLayer({
+          id: 'states-line-back',
+          type: 'line',
+          source: 'states',
+          minzoom: 3,
+          paint: {
+            'line-color': '#03060f',
+            'line-opacity': 0.88,
+            'line-blur': 0.2,
+            'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2.2, 6, 4.2, 10, 6],
+          },
+        })
+        map.addLayer({
+          id: 'states-line',
+          type: 'line',
+          source: 'states',
+          minzoom: 3,
+          paint: {
+            'line-color': 'rgba(232, 238, 252, 0.72)',
+            'line-opacity': 1,
+            'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.75, 7, 1.35, 11, 2.2],
+          },
+        })
+        map.addLayer({
+          id: 'basemap-labels',
+          type: 'raster',
+          source: 'basemap-labels',
+          paint: {
+            'raster-opacity': 1,
+            'raster-fade-duration': 150,
+          },
+        })
+        map.addLayer({
+          id: 'events-circle',
+          type: 'circle',
+          source: 'events',
+          paint: {
+            'circle-color': ['get', 'color'],
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              2,
+              ['get', 'radius_min'],
+              10,
+              ['get', 'radius_max'],
+            ],
+            'circle-opacity': ['get', 'opacity'],
+            'circle-stroke-color': 'rgba(255,255,255,0.3)',
+            'circle-stroke-width': 0.8,
+          },
+        })
 
-                {searchHighlight && Number.isFinite(searchHighlight.lat) && Number.isFinite(searchHighlight.lng) && (
-                    <SearchHighlightLayer highlight={searchHighlight} />
-                )}
+        const evSrc = map.getSource('events')
+        if (evSrc && typeof evSrc.setData === 'function') {
+          evSrc.setData({
+            type: 'FeatureCollection',
+            features: buildEventFeatures(useAtlasStore.getState().events),
+          })
+        }
 
-                {choroOn && choroplethRows.length > 0 && (
-                    <GdeltChoroplethLayer rows={choroplethRows} toneRange={toneRange} />
-                )}
-                {heatOn && heatmapPoints.length > 0 && (
-                    <GdeltHeatLayer points={heatmapPoints} />
-                )}
+        setOnResetView(() => {
+          if (!mapRef.current) return
+          mapRef.current.flyTo({ center, zoom: DEFAULT_ZOOM, duration: 1200 })
+        })
 
-                {visibleItems.map((evt) => {
-                    const color = DIMENSION_COLORS[evt.dimension] || '#1a90ff'
-                    const r = eventRadius(evt)
-                    return (
-                        <CircleMarker
-                            key={evt.id}
-                            center={[evt.lat, evt.lng]}
-                            radius={r}
-                            pathOptions={{
-                                color,
-                                fillColor: color,
-                                fillOpacity: 0.65,
-                                weight: 1.5,
-                                opacity: 0.85,
-                            }}
-                            eventHandlers={{
-                                click: () => handleEventClick(evt),
-                            }}
-                        >
-                            <Tooltip
-                                direction="top"
-                                offset={[0, -8]}
-                                className="flatmap-tooltip"
-                            >
-                                <div className="flatmap-tooltip-inner">
-                                    <span
-                                        className="flatmap-tooltip-dot"
-                                        style={{ background: color }}
-                                    />
-                                    <span className="flatmap-tooltip-cat">{evt.source || 'Event'}</span>
-                                </div>
-                                <div className="flatmap-tooltip-title">
-                                    {truncate(evt.title)}
-                                </div>
-                            </Tooltip>
-                        </CircleMarker>
-                    )
-                })}
-            </MapContainer>
-        </div>
-    )
+        const syncUsaGreedyViewport = () => onViewportForUsaGreedy(map)
+        map.on('moveend', syncUsaGreedyViewport)
+        map.on('zoomend', syncUsaGreedyViewport)
+        syncUsaGreedyViewport()
+
+        onReadyRef.current?.()
+      })
+
+      const syncZoom = () => {
+        if (!mapRef.current) return
+        const z = mapRef.current.getZoom()
+        setZoomLevel(Math.max(0, Math.min(1, (z - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM))))
+      }
+      map.on('zoom', syncZoom)
+      syncZoom()
+
+      map.on('click', 'events-circle', (e) => {
+        if (!e.features?.length) return
+        const props = e.features[0].properties
+        if (props?._eventData) {
+          try {
+            setSelectedEvent(JSON.parse(props._eventData))
+            setSelectedMarker(null)
+          } catch {
+            /* ignore */
+          }
+        }
+      })
+      map.on('mouseenter', 'events-circle', () => {
+        if (mapRef.current) mapRef.current.getCanvas().style.cursor = 'pointer'
+      })
+      map.on('mouseleave', 'events-circle', () => {
+        if (mapRef.current) mapRef.current.getCanvas().style.cursor = ''
+      })
+    })().catch((err) => {
+      console.error('[FlatMap] init failed', err)
+    })
+
+    return () => {
+      cancelled = true
+      if (usaGreedyAnimTimer != null) {
+        clearInterval(usaGreedyAnimTimer)
+        usaGreedyAnimTimer = null
+      }
+      setOnResetView(null)
+      mapRef.current = null
+      if (map) {
+        map.remove()
+        map = null
+      }
+    }
+  }, [setOnResetView, setSelectedEvent, setSelectedMarker, setZoomLevel])
+
+  useEffect(() => {
+    const m = mapRef.current
+    if (!m) return
+    const src = m.getSource('events')
+    if (src && typeof src.setData === 'function') {
+      src.setData({
+        type: 'FeatureCollection',
+        features: buildEventFeatures(events),
+      })
+    }
+  }, [events])
+
+  return <div ref={containerRef} className="fixed inset-0 z-0 flatmap-container" />
 }

@@ -1352,25 +1352,14 @@ button.atlas-logo-header-btn:focus-visible {
   border-color: rgba(0, 207, 255, 0.25);
 }
 
-/* ── Leaflet 2D Map ── */
-.flatmap-container .leaflet-container {
-  background: #0a0e1a !important;
-  font-family: "JetBrains Mono", monospace;
+/* ── 2D Map (MapLibre) ── */
+.flatmap-container {
+  width: 100%;
+  height: 100%;
 }
 
-/* Admin tint pane: normal alpha compositing over tiles (no mix-blend — avoids tile-seam glitches). */
-.flatmap-container .leaflet-pane.flatmap-land-tint {
-  /* blend removed intentionally; see FlatMap MapLandBasemapLayer */
-}
-
-.flatmap-container .leaflet-control-attribution {
-  background: rgba(8, 12, 24, 0.7) !important;
-  color: rgba(255, 255, 255, 0.3) !important;
-  font-size: 8px !important;
-}
-
-.flatmap-container .leaflet-control-attribution a {
-  color: rgba(0, 207, 255, 0.5) !important;
+.flatmap-container .maplibregl-canvas {
+  outline: none;
 }
 
 .flatmap-tooltip {
