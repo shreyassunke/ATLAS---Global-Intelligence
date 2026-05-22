@@ -1,4 +1,4 @@
-# TATVA — Global Intelligence
+# ATLAS — Global Intelligence
 
 Vite + React intel globe. See `.env.example` for API keys (copy to `.env` locally).
 
